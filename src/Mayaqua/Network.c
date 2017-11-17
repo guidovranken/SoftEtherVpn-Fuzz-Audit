@@ -156,6 +156,10 @@
 #include <sys/event.h>
 #endif	// UNIX_MACOS
 
+#ifdef FUZZING_MSAN
+#include <fuzzers/helper.h>
+#endif
+
 #ifdef	OS_WIN32
 NETWORK_WIN32_FUNCTIONS *w32net;
 struct ROUTE_CHANGE_DATA
@@ -581,6 +585,7 @@ void GetSimpleHostname(char *hostname, UINT hostname_size, char *fqdn)
 // Get the current time zone
 int GetCurrentTimezone()
 {
+#ifndef FUZZING
 	int ret = 0;
 
 #ifdef	OS_WIN32
@@ -607,6 +612,10 @@ int GetCurrentTimezone()
 #endif	// OS_WIN32
 
 	return ret;
+#else /* FUZZING */
+    /* This function is disabled in fuzzing mode */
+    abort();
+#endif
 }
 
 // Flag of whether to use the DNS proxy
@@ -5820,6 +5829,7 @@ SSL_PIPE *NewSslPipe(bool server_mode, X *x, K *k, DH_CTX *dh)
 {
 	SSL_PIPE *s;
 	SSL *ssl;
+#ifndef FUZZING
 	SSL_CTX *ssl_ctx = NewSSLCtx(server_mode);
 
 	Lock(openssl_lock);
@@ -5856,17 +5866,24 @@ SSL_PIPE *NewSslPipe(bool server_mode, X *x, K *k, DH_CTX *dh)
 		ssl = SSL_new(ssl_ctx);
 	}
 	Unlock(openssl_lock);
+#endif /* FUZZING */
 
 	s = ZeroMalloc(sizeof(SSL_PIPE));
 
+#ifndef FUZZING
 	s->ssl = ssl;
 	s->ssl_ctx = ssl_ctx;
+#else
+	s->ssl = (void*)8;
+	s->ssl_ctx = (void*)8;
+#endif
 	s->ServerMode = server_mode;
 
 	s->SslInOut = NewSslBioSsl();
 	s->RawIn = NewSslBioMem();
 	s->RawOut = NewSslBioMem();
 
+#ifndef FUZZING
 	if (x != NULL && k != NULL)
 	{
 		Lock(openssl_lock);
@@ -5888,6 +5905,7 @@ SSL_PIPE *NewSslPipe(bool server_mode, X *x, K *k, DH_CTX *dh)
 
 	SSL_set_bio(s->ssl, s->RawIn->bio, s->RawOut->bio);
 	BIO_set_ssl(s->SslInOut->bio, s->ssl, BIO_NOCLOSE);
+#endif
 
 	//s->RawIn->NoFree = true;
 	s->RawOut->NoFree = true;
@@ -5909,23 +5927,29 @@ bool SyncSslPipe(SSL_PIPE *s)
 	{
 		if (SslBioSync(s->RawIn, true, false) == false)
 		{
+#ifndef FUZZING
 			s->IsDisconnected = true;
 			Debug("SyncSslPipe: s->RawIn error.\n");
 			return false;
+#endif
 		}
 
 		if (SslBioSync(s->RawOut, false, true) == false)
 		{
+#ifndef FUZZING
 			s->IsDisconnected = true;
 			Debug("SyncSslPipe: s->RawOut error.\n");
 			return false;
+#endif
 		}
 
 		if (SslBioSync(s->SslInOut, true, true) == false)
 		{
+#ifndef FUZZING
 			s->IsDisconnected = true;
 			Debug("SyncSslPipe: s->SslInOut error.\n");
 			return false;
+#endif
 		}
 	}
 
@@ -5946,7 +5970,9 @@ void FreeSslPipe(SSL_PIPE *s)
 	FreeSslBio(s->RawOut);
 
 	SSL_free(s->ssl);
+#ifndef FUZZING
 	SSL_CTX_free(s->ssl_ctx);
+#endif
 
 	Free(s);
 }
@@ -5960,7 +5986,9 @@ void FreeSslBio(SSL_BIO *b)
 		return;
 	}
 
+#ifndef FUZZING
 	if (b->NoFree == false)
+#endif
 	{
 		BIO_free(b->bio);
 	}
@@ -6016,7 +6044,14 @@ bool SslBioSync(SSL_BIO *b, bool sync_send, bool sync_recv)
 	{
 		while (b->SendFifo->size >= 1)
 		{
+#ifndef FUZZING
 			int r = BIO_write(b->bio, GetFifoPointer(b->SendFifo), FifoSize(b->SendFifo));
+#else
+            int r;
+            UINT r2;
+            r2 = Send((SOCK*)8, GetFifoPointer(b->SendFifo), FifoSize(b->SendFifo), false);
+            r = r2 == SOCK_LATER ? -1 : (int)r2;
+#endif
 
 			if (r == 0)
 			{
@@ -6028,11 +6063,13 @@ bool SslBioSync(SSL_BIO *b, bool sync_send, bool sync_recv)
 			{
 				if (r < 0)
 				{
+#ifndef FUZZING
 					if (BIO_should_retry(b->bio))
 					{
 						break;
 					}
 					else
+#endif
 					{
 						b->IsDisconnected = true;
 						WHERE;
@@ -6055,7 +6092,12 @@ bool SslBioSync(SSL_BIO *b, bool sync_send, bool sync_recv)
 			UCHAR tmp[4096];
 			int r;
 
+#ifndef FUZZING
 			r = BIO_read(b->bio, tmp, sizeof(tmp));
+#else
+            UINT r2 = Recv((SOCK*)8, tmp, sizeof(tmp), false);
+            r = r2 == SOCK_LATER ? -1 : (int)r2;
+#endif
 
 			if (r == 0)
 			{
@@ -6067,11 +6109,13 @@ bool SslBioSync(SSL_BIO *b, bool sync_send, bool sync_recv)
 			{
 				if (r < 0)
 				{
+#ifndef FUZZING
 					if (BIO_should_retry(b->bio))
 					{
 						break;
 					}
 					else
+#endif
 					{
 						b->IsDisconnected = true;
 						WHERE;
@@ -8836,6 +8880,7 @@ bool UnixGetDefaultDns(IP *ip)
 // Select procedure
 void UnixSelect(SOCKSET *set, UINT timeout, CANCEL *c1, CANCEL *c2)
 {
+#ifndef FUZZING
 	UINT reads[MAXIMUM_WAIT_OBJECTS];
 	UINT writes[MAXIMUM_WAIT_OBJECTS];
 	UINT num_read, num_write, i;
@@ -8987,6 +9032,9 @@ void UnixSelect(SOCKSET *set, UINT timeout, CANCEL *c1, CANCEL *c2)
 		}
 		while (ret >= 1);
 	}
+#else /* FUZZING */
+    /* Do nothing in fuzzing mode */
+#endif
 }
 
 // Cancel
@@ -9072,6 +9120,7 @@ void UnixJoinSockToSockEvent(SOCK *sock, SOCK_EVENT *event)
 // Wait for a socket event
 bool UnixWaitSockEvent(SOCK_EVENT *event, UINT timeout)
 {
+#ifndef FUZZING
 	UINT num_read, num_write;
 	UINT *reads, *writes;
 	UINT n;
@@ -9145,6 +9194,10 @@ bool UnixWaitSockEvent(SOCK_EVENT *event, UINT timeout)
 	Free(writes);
 
 	return true;
+#else /* FUZZING */
+    /* This function is disabled in fuzzing mode */
+    abort();
+#endif
 }
 
 // Set the socket event
@@ -9175,6 +9228,7 @@ int safe_fd_set(int fd, fd_set* fds, int* max_fd) {
 // Execute 'select' for the socket
 void UnixSelectInner(UINT num_read, UINT *reads, UINT num_write, UINT *writes, UINT timeout)
 {
+#ifndef FUZZING
 #ifdef	UNIX_MACOS
 	fd_set rfds; //read descriptors
 	fd_set wfds; //write descriptors
@@ -9274,6 +9328,10 @@ void UnixSelectInner(UINT num_read, UINT *reads, UINT num_write, UINT *writes, U
 #ifndef	UNIX_MACOS
 	Free(p);
 #endif	// not UNIX_MACOS
+#else /* FUZZING */
+    /* This function is disabled in fuzzing mode */
+    abort();
+#endif
 }
 
 // Clean-up of the socket event
@@ -9316,6 +9374,7 @@ SOCK_EVENT *UnixNewSockEvent()
 // Close the pipe
 void UnixDeletePipe(int p1, int p2)
 {
+#ifndef FUZZING
 	if (p1 != -1)
 	{
 		close(p1);
@@ -9325,18 +9384,22 @@ void UnixDeletePipe(int p1, int p2)
 	{
 		close(p2);
 	}
+#endif
 }
 
 // Write to the pipe
 void UnixWritePipe(int pipe_write)
 {
+#ifndef FUZZING
 	char c = 1;
 	write(pipe_write, &c, 1);
+#endif
 }
 
 // Create a new pipe
 void UnixNewPipe(int *pipe_read, int *pipe_write)
 {
+#ifndef FUZZING
 	int fd[2];
 	// Validate arguments
 	if (pipe_read == NULL || pipe_write == NULL)
@@ -9353,11 +9416,13 @@ void UnixNewPipe(int *pipe_read, int *pipe_write)
 
 	UnixSetSocketNonBlockingMode(*pipe_write, true);
 	UnixSetSocketNonBlockingMode(*pipe_read, true);
+#endif
 }
 
 // Release the asynchronous socket
 void UnixFreeAsyncSocket(SOCK *sock)
 {
+#ifndef FUZZING
 	UINT p;
 	// Validate arguments
 	if (sock == NULL)
@@ -9402,6 +9467,7 @@ void UnixFreeAsyncSocket(SOCK *sock)
 		}
 	}
 	Unlock(sock->lock);
+#endif
 }
 
 // Set the socket to asynchronous mode
@@ -10897,6 +10963,7 @@ void Win32Select(SOCKSET *set, UINT timeout, CANCEL *c1, CANCEL *c2)
 // Check whether the IPv6 is supported
 bool IsIPv6Supported()
 {
+#ifndef FUZZING
 #ifdef	NO_IPV6
 	return false;
 #else	// NO_IPV6
@@ -10912,6 +10979,10 @@ bool IsIPv6Supported()
 
 	return true;
 #endif	// NO_IPV6
+#else/* FUZZING */
+    /* This function is disabled in fuzzing mode */
+    abort();
+#endif
 }
 
 // Get the host name from the host cache
@@ -11170,6 +11241,7 @@ void RenewDhcp()
 // Get a domain name for UNIX
 bool UnixGetDomainName(char *name, UINT size)
 {
+#ifndef FUZZING
 	bool ret = false;
 	BUF *b = ReadDump("/etc/resolv.conf");
 
@@ -11210,6 +11282,10 @@ bool UnixGetDomainName(char *name, UINT size)
 	FreeBuf(b);
 
 	return ret;
+#else /* FUZZING */
+    /* This function is disabled in fuzzing mode */
+    abort();
+#endif
 }
 
 // Get the domain name
@@ -11772,14 +11848,21 @@ UINT RecvFrom(SOCK *sock, IP *src_addr, UINT *src_port, void *data, UINT size)
 	int ret, sz;
 	struct sockaddr_in addr;
 	// Validate arguments
+#ifndef FUZZING
 	if (sock != NULL)
 	{
 		sock->IgnoreRecvErr = false;
 	}
+#endif
+#ifndef FUZZING
 	if (sock == NULL || src_addr == NULL || src_port == NULL || data == NULL)
+#else
+	if (src_addr == NULL || src_port == NULL || data == NULL)
+#endif /* FUZZING */
 	{
 		return false;
 	}
+#ifndef FUZZING
 	if (sock->Type != SOCK_UDP || sock->socket == INVALID_SOCKET)
 	{
 		return false;
@@ -11856,9 +11939,17 @@ UINT RecvFrom(SOCK *sock, IP *src_addr, UINT *src_port, void *data, UINT size)
 #endif	// OS_WIN32
 		return 0;
 	}
+#else /* FUZZING */
+    memset(src_addr, 0x11, sizeof(IP));
+    memset(src_port, 0x11, sizeof(UINT));
+    Recv((SOCK*)8, src_addr, sizeof(IP), false);
+    Recv((SOCK*)8, src_port, sizeof(UINT), false);
+    return Recv(sock, data, size, false);
+#endif /* FUZZING */
 }
 UINT RecvFrom6(SOCK *sock, IP *src_addr, UINT *src_port, void *data, UINT size)
 {
+#ifndef FUZZING
 	SOCKET s;
 	int ret, sz;
 	struct sockaddr_in6 addr;
@@ -11936,6 +12027,9 @@ UINT RecvFrom6(SOCK *sock, IP *src_addr, UINT *src_port, void *data, UINT size)
 #endif	// OS_WIN32
 		return 0;
 	}
+#else /* FUZZING */
+    return Recv(sock, data, size, false);
+#endif /* FUZZING */
 }
 
 // Lock the OpenSSL
@@ -11957,6 +12051,7 @@ UINT SendTo(SOCK *sock, IP *dest_addr, UINT dest_port, void *data, UINT size)
 }
 UINT SendToEx(SOCK *sock, IP *dest_addr, UINT dest_port, void *data, UINT size, bool broadcast)
 {
+#ifndef FUZZING
 	SOCKET s;
 	int ret;
 	struct sockaddr_in addr;
@@ -12057,6 +12152,9 @@ UINT SendToEx(SOCK *sock, IP *dest_addr, UINT dest_port, void *data, UINT size, 
 	Unlock(sock->lock);
 
 	return ret;
+#else /* FUZZING */
+    return Send(sock, data, size, false);
+#endif /* FUZZING */
 }
 UINT SendTo6(SOCK *sock, IP *dest_addr, UINT dest_port, void *data, UINT size)
 {
@@ -12064,6 +12162,7 @@ UINT SendTo6(SOCK *sock, IP *dest_addr, UINT dest_port, void *data, UINT size)
 }
 UINT SendTo6Ex(SOCK *sock, IP *dest_addr, UINT dest_port, void *data, UINT size, bool broadcast)
 {
+#ifndef FUZZING
 	SOCKET s;
 	int ret;
 	struct sockaddr_in6 addr;
@@ -12159,11 +12258,15 @@ UINT SendTo6Ex(SOCK *sock, IP *dest_addr, UINT dest_port, void *data, UINT size,
 	Unlock(sock->lock);
 
 	return ret;
+#else
+    return Send(sock, data, size, false);
+#endif
 }
 
 // Disable the UDP checksum
 void DisableUDPChecksum(SOCK *s)
 {
+#ifndef FUZZING
 	bool true_flag = true;
 	// Validate arguments
 	if (s == NULL || s->Type != SOCK_UDP)
@@ -12180,6 +12283,10 @@ void DisableUDPChecksum(SOCK *s)
 #endif	// UDP_NOCHECKSUM
 		}
 	}
+#else /* FUZZING */
+    /* This function is disabled in fuzzing mode */
+    abort();
+#endif /* FUZZING */
 }
 
 // Set the socket to asynchronous mode
@@ -12352,6 +12459,7 @@ SOCK *NewUDPEx2RandMachineAndExePath(bool ipv6, IP *ip, UINT num_retry, UCHAR ra
 // Set the DF bit of the socket
 void ClearSockDfBit(SOCK *s)
 {
+#ifndef FUZZING
 #ifdef	IP_PMTUDISC_DONT
 #ifdef	IP_MTU_DISCOVER
 	UINT value = IP_PMTUDISC_DONT;
@@ -12363,11 +12471,16 @@ void ClearSockDfBit(SOCK *s)
 	setsockopt(s->socket, IPPROTO_IP, IP_MTU_DISCOVER, (char *)&value, sizeof(value));
 #endif	// IP_MTU_DISCOVER
 #endif	// IP_PMTUDISC_DONT
+#else /* FUZZING */
+    /* This function is disabled in fuzzing mode */
+    abort();
+#endif /* FUZZING */
 }
 
 // Set the header-include option
 void SetRawSockHeaderIncludeOption(SOCK *s, bool enable)
 {
+#ifndef FUZZING
 	UINT value = BOOL_TO_INT(enable);
 	if (s == NULL || s->IsRawSocket == false)
 	{
@@ -12377,6 +12490,10 @@ void SetRawSockHeaderIncludeOption(SOCK *s, bool enable)
 	setsockopt(s->socket, IPPROTO_IP, IP_HDRINCL, (char *)&value, sizeof(value));
 
 	s->RawIP_HeaderIncludeFlag = enable;
+#else /* FUZZING */
+    /* This function is disabled in fuzzing mode */
+    abort();
+#endif /* FUZZING */
 }
 
 // Create and initialize the UDP socket
@@ -12419,6 +12536,7 @@ SOCK *NewUDPEx3(UINT port, IP *ip)
 }
 SOCK *NewUDP4(UINT port, IP *ip)
 {
+#ifndef FUZZING
 	SOCK *sock;
 	SOCKET s;
 	struct sockaddr_in addr;
@@ -12517,9 +12635,14 @@ SOCK *NewUDP4(UINT port, IP *ip)
 	QuerySocketInformation(sock);
 
 	return sock;
+#else /* FUZZING */
+    /* This function is disabled in fuzzing mode */
+    abort();
+#endif /* FUZZING */
 }
 SOCK *NewUDP6(UINT port, IP *ip)
 {
+#ifndef FUZZING
 	SOCK *sock;
 	SOCKET s;
 	struct sockaddr_in6 addr;
@@ -12618,6 +12741,10 @@ SOCK *NewUDP6(UINT port, IP *ip)
 	QuerySocketInformation(sock);
 
 	return sock;
+#else /* FUZZING */
+    /* This function is disabled in fuzzing mode */
+    abort();
+#endif /* FUZZING */
 }
 
 // Select function
@@ -13503,6 +13630,7 @@ UINT SecureRecv(SOCK *sock, void *data, UINT size)
 // TCP-SSL transmission
 UINT SecureSend(SOCK *sock, void *data, UINT size)
 {
+#ifndef FUZZING
 	SOCKET s;
 	int ret, e;
 	SSL *ssl;
@@ -13569,11 +13697,15 @@ UINT SecureSend(SOCK *sock, void *data, UINT size)
 	//Debug("%s %u SecureRecv() Disconnect\n", __FILE__, __LINE__);
 	Disconnect(sock);
 	return 0;
+#else /* FUZZING */
+    return Send(sock, data, size, false);
+#endif /* FUZZING */
 }
 
 // Peep the TCP
 UINT Peek(SOCK *sock, void *data, UINT size)
 {
+#ifndef FUZZING
 	SOCKET s;
 	int ret;
 
@@ -13608,12 +13740,47 @@ UINT Peek(SOCK *sock, void *data, UINT size)
 		return ret;
 	}
 
+#endif
 	return 0;
 }
+
+#ifdef FUZZING
+unsigned char* recv_input_data = NULL;
+size_t recv_input_size = 0;
+
+int recv_random = 0;
+int send_random = 0;
+
+void FuzzingSetRecvInput(unsigned char* data, size_t size)
+{
+    recv_input_data = data;
+    recv_input_size = size;
+}
+
+size_t FuzzingInputSize(void)
+{
+    return recv_input_size;
+}
+
+void FuzzingSetRecvRandom(int i)
+{
+    recv_random = i;
+}
+
+void FuzzingSetSendRandom(int i)
+{
+    send_random = i;
+}
+
+int FuzzingNoMoreRecv(void) {
+    return recv_input_size == 0;
+}
+#endif
 
 // TCP receive
 UINT Recv(SOCK *sock, void *data, UINT size, bool secure)
 {
+#ifndef FUZZING
 	SOCKET s;
 	int ret;
 
@@ -13719,11 +13886,59 @@ UINT Recv(SOCK *sock, void *data, UINT size, bool secure)
 	// Disconnected
 	Disconnect(sock);
 	return 0;
+#else /* FUZZING */
+    if ( recv_input_data == NULL ) {
+        printf("Warning: Recv() called but no input data defined\n");
+        return 0;
+    }
+    /* In recv_random mode, a variable number of bytes is read
+     * into the buffer. (the exact number is read from the fuzzer
+     * input)
+     */
+    if ( recv_random ) {
+        if ( recv_input_size >= sizeof(UINT) ) {
+            UINT x;
+            memcpy(&x, recv_input_data, sizeof(UINT));
+            recv_input_data += sizeof(UINT);
+            recv_input_size -= sizeof(UINT);
+
+            if ( x >= 0x80000000 ) {
+                return SOCK_LATER;
+            }
+            if ( x == 0x7FFFFFFF ) {
+                /* Special case */
+                memset(data, 0x00, size);
+                return size;
+            } else {
+                if ( x <= size ) {
+                    size = x;
+                } else {
+                    return SOCK_LATER;
+                }
+            }
+        }
+    }
+
+    /* Curtail the size if it exceeds the amount of data left in the fuzzer
+     * input
+     */
+    if ( size > recv_input_size ) {
+        size = recv_input_size;
+    }
+
+    memcpy(data, recv_input_data, size);
+
+    recv_input_data += size;
+    recv_input_size -= size;
+
+    return size;
+#endif /* FUZZING */
 }
 
 // TCP transmission
 UINT Send(SOCK *sock, void *data, UINT size, bool secure)
 {
+#ifndef FUZZING
 	SOCKET s;
 	int ret;
 	// Validate arguments
@@ -13798,6 +14013,37 @@ UINT Send(SOCK *sock, void *data, UINT size, bool secure)
 	// Disconnected
 	Disconnect(sock);
 	return 0;
+#else /* FUZZING */
+#ifdef FUZZING_MSAN
+    test_MSAN(data, size);
+#endif
+
+    if ( send_random ) {
+        if ( recv_input_size >= sizeof(UINT) ) {
+            UINT x;
+            memcpy(&x, recv_input_data, sizeof(UINT));
+            recv_input_data += sizeof(UINT);
+            recv_input_size -= sizeof(UINT);
+
+            if ( x >= 0x80000000 ) {
+                return SOCK_LATER;
+            }
+
+            if ( x <= size ) {
+                size = x;
+            } else {
+                return SOCK_LATER;
+            }
+        }
+    }
+
+    /* Do not actually send anything because sockets
+     * don't actually exist in fuzzing mode. Just return
+     * the amount of bytes that we're pretending to have sent
+     */
+
+    return size;
+#endif
 }
 
 // Get the time-out value (in milliseconds)
@@ -13838,6 +14084,7 @@ void SetTimeout(SOCK *sock, UINT timeout)
 
 //	Debug("SetTimeout(%u)\n",timeout);
 
+#ifndef FUZZING
 	if (sock->Type != SOCK_INPROC)
 	{
 #ifdef OS_WIN32
@@ -13859,6 +14106,7 @@ void SetTimeout(SOCK *sock, UINT timeout)
 #endif // UNIX_SOLARIS
 #endif // OS_UNIX
 	}
+#endif /* FUZZING */
 }
 
 // Disable GetHostName call by accepting new TCP connection
@@ -13907,6 +14155,7 @@ void AcceptInitEx(SOCK *s, bool no_lookup_hostname)
 // TCP connection acceptance (IPv4)
 SOCK *Accept(SOCK *sock)
 {
+#ifndef FUZZING
 	SOCK *ret;
 	SOCKET s, new_socket;
 	int size;
@@ -14025,11 +14274,16 @@ SOCK *Accept(SOCK *sock)
 	StrCpy(ret->UnderlayProtocol, sizeof(ret->UnderlayProtocol), SOCK_UNDERLAY_NATIVE_V4);
 
 	return ret;
+#else /* FUZZING */
+    /* This function is disabled in fuzzing mode */
+    abort();
+#endif /* FUZZING */
 }
 
 // TCP connection acceptance (IPv6)
 SOCK *Accept6(SOCK *sock)
 {
+#ifndef FUZZING
 	SOCK *ret;
 	SOCKET s, new_socket;
 	int size;
@@ -14135,6 +14389,10 @@ SOCK *Accept6(SOCK *sock)
 	StrCpy(ret->UnderlayProtocol, sizeof(ret->UnderlayProtocol), SOCK_UNDERLAY_NATIVE_V6);
 
 	return ret;
+#else /* FUZZING */
+    /* This function is disabled in fuzzing mode */
+    abort();
+#endif /* FUZZING */
 }
 
 // Standby for TCP (IPv6)
@@ -14148,6 +14406,7 @@ SOCK *ListenEx6(UINT port, bool local_only)
 }
 SOCK *ListenEx62(UINT port, bool local_only, bool enable_ca)
 {
+#ifndef FUZZING
 	SOCKET s;
 	SOCK *sock;
 	struct sockaddr_in6 addr;
@@ -14246,6 +14505,10 @@ SOCK *ListenEx62(UINT port, bool local_only, bool enable_ca)
 	sock->EnableConditionalAccept = enable_ca;
 
 	return sock;
+#else /* FUZZING */
+    /* This function is disabled in fuzzing mode */
+    abort();
+#endif /* FUZZING */
 }
 
 // Standby for the TCP
@@ -14259,6 +14522,7 @@ SOCK *ListenEx(UINT port, bool local_only)
 }
 SOCK *ListenEx2(UINT port, bool local_only, bool enable_ca)
 {
+#ifndef FUZZING
 	SOCKET s;
 	SOCK *sock;
 	struct sockaddr_in addr;
@@ -14351,11 +14615,16 @@ SOCK *ListenEx2(UINT port, bool local_only, bool enable_ca)
 	sock->EnableConditionalAccept = enable_ca;
 
 	return sock;
+#else /* FUZZING */
+    /* This function is disabled in fuzzing mode */
+    abort();
+#endif /* FUZZING */
 }
 
 // TCP disconnect
 void Disconnect(SOCK *sock)
 {
+#ifndef FUZZING
 	SOCKET s;
 	bool true_flag = true;
 	bool false_flag = false;
@@ -14643,6 +14912,7 @@ void Disconnect(SOCK *sock)
 	Unlock(sock->disconnect_lock);
 
 	Unlock(disconnect_function_lock);
+#endif
 }
 
 typedef struct TCP_PORT_CHECK
@@ -14885,6 +15155,7 @@ int connect_timeout(SOCKET s, struct sockaddr *addr, int size, int timeout, bool
 // Set the TOS value of the socket
 void SetSockTos(SOCK *s, int tos)
 {
+#ifndef FUZZING
 	// Validate arguments
 	if (s == NULL)
 	{
@@ -14901,6 +15172,10 @@ void SetSockTos(SOCK *s, int tos)
 #endif	// IP_TOS
 
 	s->CurrentTos = tos;
+#else /* FUZZING */
+    /* This function is disabled in fuzzing mode */
+    abort();
+#endif /* FUZZING */
 }
 
 // Set the priority of the socket
@@ -14918,6 +15193,7 @@ void SetSockHighPriority(SOCK *s, bool flag)
 // Connect to the IPv4 host using a socket
 SOCKET ConnectTimeoutIPv4(IP *ip, UINT port, UINT timeout, bool *cancel_flag)
 {
+#ifndef FUZZING
 	SOCKET s;
 	struct sockaddr_in sockaddr4;
 	struct in_addr addr4;
@@ -14945,6 +15221,10 @@ SOCKET ConnectTimeoutIPv4(IP *ip, UINT port, UINT timeout, bool *cancel_flag)
 	}
 
 	return s;
+#else /* FUZZING */
+    /* This function is disabled in fuzzing mode */
+    abort();
+#endif
 }
 
 // Identify whether the HTTPS server to be connected is a SoftEther VPN
@@ -15228,6 +15508,7 @@ SOCK *ConnectEx3(char *hostname, UINT port, UINT timeout, bool *cancel_flag, cha
 }
 SOCK *ConnectEx4(char *hostname, UINT port, UINT timeout, bool *cancel_flag, char *nat_t_svc_name, UINT *nat_t_error_code, bool try_start_ssl, bool ssl_no_tls, bool no_get_hostname, IP *ret_ip)
 {
+#ifndef FUZZING
 	SOCK *sock;
 	SOCKET s;
 	struct linger ling;
@@ -15735,11 +16016,16 @@ SOCK *ConnectEx4(char *hostname, UINT port, UINT timeout, bool *cancel_flag, cha
 	sock->IPv6 = is_ipv6;
 
 	return sock;
+#else /* FUZZING */
+    /* This function is disabled in fuzzing mode */
+    abort();
+#endif
 }
 
 // Maximize the I/O buffer size of the socket
 void SetSocketSendRecvBufferSize(SOCKET s, UINT size)
 {
+#ifndef FUZZING
 	int value = (int)size;
 	// Validate arguments
 	if (s == INVALID_SOCKET)
@@ -15749,11 +16035,16 @@ void SetSocketSendRecvBufferSize(SOCKET s, UINT size)
 
 	setsockopt(s, SOL_SOCKET, SO_RCVBUF, (char *)&value, sizeof(int));
 	setsockopt(s, SOL_SOCKET, SO_SNDBUF, (char *)&value, sizeof(int));
+#else /* FUZZING */
+    /* This function is disabled in fuzzing mode */
+    abort();
+#endif /* FUZZING */
 }
 
 // Get the buffer size of the socket
 UINT GetSocketBufferSize(SOCKET s, bool send)
 {
+#ifndef FUZZING
 	int value = 0;
 	int len = sizeof(int);
 	// Validate arguments
@@ -15768,11 +16059,16 @@ UINT GetSocketBufferSize(SOCKET s, bool send)
 	}
 
 	return value;
+#else /* FUZZING */
+    /* This function is disabled in fuzzing mode */
+    abort();
+#endif /* FUZZING */
 }
 
 // Setting the buffer size of the socket
 bool SetSocketBufferSize(SOCKET s, bool send, UINT size)
 {
+#ifndef FUZZING
 	int value = (int)size;
 	// Validate arguments
 	if (s == INVALID_SOCKET)
@@ -15786,6 +16082,10 @@ bool SetSocketBufferSize(SOCKET s, bool send, UINT size)
 	}
 
 	return true;
+#else /* FUZZING */
+    /* This function is disabled in fuzzing mode */
+    abort();
+#endif /* FUZZING */
 }
 UINT SetSocketBufferSizeWithBestEffort(SOCKET s, bool send, UINT size)
 {
@@ -15821,6 +16121,7 @@ void InitUdpSocketBufferSize(SOCKET s)
 // Get the socket information
 void QuerySocketInformation(SOCK *sock)
 {
+#ifndef FUZZING
 	// Validate arguments
 	if (sock == NULL)
 	{
@@ -15935,11 +16236,16 @@ void QuerySocketInformation(SOCK *sock)
 		}
 	}
 	Unlock(sock->lock);
+#else /* FUZZING */
+    /* This function is disabled in fuzzing mode */
+    abort();
+#endif /* FUZZING */
 }
 
 // Setting the TTL value
 bool SetTtl(SOCK *sock, UINT ttl)
 {
+#ifndef FUZZING
 	DWORD dw;
 	int size;
 	UINT opt_value = 0;
@@ -15984,6 +16290,10 @@ bool SetTtl(SOCK *sock, UINT ttl)
 	sock->CurrentTtl = ttl;
 
 	return true;
+#else /* FUZZING */
+    /* This function is disabled in fuzzing mode */
+    abort();
+#endif /* FUZZING */
 }
 
 // Release of the socket
@@ -17368,6 +17678,10 @@ bool QueryDnsCacheEx(IP *ip, char *hostname, bool ipv6)
 void IPToUniStr(wchar_t *str, UINT size, IP *ip)
 {
 	char tmp[128];
+#ifdef FUZZING
+    /* Ensure tmp is not null-terminated */
+    memset(tmp, 'x', sizeof(tmp));
+#endif
 
 	IPToStr(tmp, sizeof(tmp), ip);
 	StrToUni(str, size, tmp);
@@ -17377,6 +17691,10 @@ void IPToUniStr(wchar_t *str, UINT size, IP *ip)
 void IPToUniStr32(wchar_t *str, UINT size, UINT ip)
 {
 	char tmp[128];
+#ifdef FUZZING
+    /* Ensure tmp is not null-terminated */
+    memset(tmp, 'x', sizeof(tmp));
+#endif
 
 	IPToStr32(tmp, sizeof(tmp), ip);
 	StrToUni(str, size, tmp);
@@ -19180,6 +19498,13 @@ bool TubeSendEx2(TUBE *t, void *data, UINT size, void *header, bool no_flush, UI
 	{
 		return false;
 	}
+
+#ifdef FUZZING
+    Send((SOCK*)8, data, size, false);
+    if ( t == (TUBE*)8 ) {
+        return true;
+    }
+#endif
 
 	if (IsTubeConnected(t) == false)
 	{
@@ -21345,6 +21670,7 @@ UINT RecvInProc(SOCK *sock, void *data, UINT size)
 // Wait for the arrival of data on multiple tubes
 void WaitForTubes(TUBE **tubes, UINT num, UINT timeout)
 {
+#ifndef FUZZING
 	// Validate arguments
 	if (num != 0 && tubes == NULL)
 	{
@@ -21365,6 +21691,10 @@ void WaitForTubes(TUBE **tubes, UINT num, UINT timeout)
 #else	// OS_WIN32
 	UnixWaitForTubes(tubes, num, timeout);
 #endif	// OS_WIN32
+#else /* FUZZING */
+    /* This function is disabled in fuzzing mode */
+    abort();
+#endif
 }
 
 #ifdef	OS_WIN32

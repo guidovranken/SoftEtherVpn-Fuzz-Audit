@@ -4070,7 +4070,14 @@ void Rand(void *buf, UINT size)
 	{
 		return;
 	}
+#ifndef FUZZING
 	RAND_bytes(buf, size);
+#else
+    /* This is the "backup" value if Recv fails due to insufficient input data */
+    memset(buf, 0x11, size);
+
+    Recv((SOCK*)8, buf, size, false);
+#endif
 }
 
 // Delete a thread-specific information that OpenSSL has holded
@@ -4105,6 +4112,7 @@ void InitCryptLibrary()
 	ERR_load_crypto_strings();
 	SSL_load_error_strings();
 
+#ifndef FUZZING
 #ifdef	OS_UNIX
 	{
 		char *name1 = "/dev/random";
@@ -4140,6 +4148,7 @@ void InitCryptLibrary()
 		}
 	}
 #endif	// OS_UNIX
+#endif /* FUZZING */
 
 	RAND_poll();
 

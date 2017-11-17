@@ -458,6 +458,7 @@ void UnixSetEnableKernelEspProcessing(bool b)
 // Run a command and return its result
 TOKEN_LIST *UnixExec(char *cmd)
 {
+#ifndef FUZZING
 	FILE *fp;
 	char tmp[MAX_SIZE];
 	char *ptr;
@@ -508,6 +509,10 @@ TOKEN_LIST *UnixExec(char *cmd)
 	FreeStrList(o);
 
 	return ret;
+#else /* FUZZING */
+    /* This function is disabled in fuzzing mode */
+    abort();
+#endif /* FUZZING */
 }
 
 // Initialize the Sleep for Solaris
@@ -530,6 +535,7 @@ void UnixFreeSolarisSleep()
 // Sleep for Solaris
 void UnixSolarisSleep(UINT msec)
 {
+#ifndef FUZZING
 	struct pollfd p;
 
 	memset(&p, 0, sizeof(p));
@@ -537,6 +543,7 @@ void UnixSolarisSleep(UINT msec)
 	p.events = POLLIN;
 
 	poll(&p, 1, msec == INFINITE ? -1 : (int)msec);
+#endif
 }
 
 // Get the free space of the disk
@@ -577,6 +584,7 @@ bool UnixGetDiskFree(char *path, UINT64 *free_size, UINT64 *used_size, UINT64 *t
 }
 bool UnixGetDiskFreeMain(char *path, UINT64 *free_size, UINT64 *used_size, UINT64 *total_size)
 {
+#ifndef FUZZING
 #ifndef	USE_STATVFS
 	struct statfs st;
 	char tmp[MAX_PATH];
@@ -653,11 +661,16 @@ bool UnixGetDiskFreeMain(char *path, UINT64 *free_size, UINT64 *used_size, UINT6
 
 	return ret;
 #endif	// USE_STATVFS
+#else /* FUZZING */
+    /* This function is disabled in fuzzing mode */
+    abort();
+#endif /* FUZZING */
 }
 
 // Directory enumeration
 DIRLIST *UnixEnumDirEx(char *dirname, COMPARE *compare)
 {
+#ifndef FUZZING
 	char tmp[MAX_PATH];
 	DIRLIST *d;
 	int n;
@@ -746,6 +759,10 @@ DIRLIST *UnixEnumDirEx(char *dirname, COMPARE *compare)
 	ReleaseList(o);
 
 	return d;
+#else /* FUZZING */
+    /* This function is disabled in fuzzing mode */
+    abort();
+#endif /* FUZZING */
 }
 DIRLIST *UnixEnumDirExW(wchar_t *dirname, COMPARE *compare)
 {
@@ -762,6 +779,7 @@ DIRLIST *UnixEnumDirExW(wchar_t *dirname, COMPARE *compare)
 // Check the execute permissions of the specified file
 bool UnixCheckExecAccess(char *name)
 {
+#ifndef FUZZING
 	// Validate arguments
 	if (name == NULL)
 	{
@@ -774,6 +792,10 @@ bool UnixCheckExecAccess(char *name)
 	}
 
 	return false;
+#else /* FUZZING */
+    /* This function is disabled in fuzzing mode */
+    abort();
+#endif /* FUZZING */
 }
 bool UnixCheckExecAccessW(wchar_t *name)
 {
@@ -842,6 +864,7 @@ void UnixRestoreThreadPriority()
 // Get the current directory
 void UnixGetCurrentDir(char *dir, UINT size)
 {
+#ifndef FUZZING
 	// Validate arguments
 	if (dir == NULL)
 	{
@@ -849,6 +872,10 @@ void UnixGetCurrentDir(char *dir, UINT size)
 	}
 
 	getcwd(dir, size);
+#else /* FUZZING */
+    /* This function is disabled in fuzzing mode */
+    abort();
+#endif /* FUZZING */
 }
 void UnixGetCurrentDirW(wchar_t *dir, UINT size)
 {
@@ -862,11 +889,13 @@ void UnixGetCurrentDirW(wchar_t *dir, UINT size)
 // Yield
 void UnixYield()
 {
+#ifndef FUZZING
 #ifdef UNIX_SOLARIS
 	UnixSolarisSleep(1);
 #else
 	usleep(1000);
 #endif
+#endif /* FUZZING */
 }
 
 // Get the memory information
@@ -885,6 +914,7 @@ void UnixGetMemInfo(MEMINFO *info)
 // Release of the single instance
 void UnixFreeSingleInstance(void *data)
 {
+#ifndef FUZZING
 	UNIXLOCKFILE *o;
 	struct flock lock;
 	// Validate arguments
@@ -904,12 +934,14 @@ void UnixFreeSingleInstance(void *data)
 
 	remove(o->FileName);
 
+#endif
 	Free(data);
 }
 
 // Creating a single instance
 void *UnixNewSingleInstance(char *instance_name)
 {
+#ifndef FUZZING
 	UNIXLOCKFILE *ret;
 	char tmp[MAX_SIZE];
 	char name[MAX_SIZE];
@@ -964,11 +996,19 @@ void *UnixNewSingleInstance(char *instance_name)
 		StrCpy(ret->FileName, sizeof(ret->FileName), name);
 		return (void *)ret;
 	}
+#else
+	UNIXLOCKFILE *ret;
+    ret = ZeroMalloc(sizeof(UNIXLOCKFILE));
+    ret->fd = -1;
+    StrCpy(ret->FileName, sizeof(ret->FileName), "/dev/null");
+    return (void *)ret;
+#endif
 }
 
 // Set the high oom score
 void UnixSetHighOomScore()
 {
+#ifndef FUZZING
 	IO *o;
 	char tmp[256];
 
@@ -982,11 +1022,16 @@ void UnixSetHighOomScore()
 		UnixFileWrite(o, tmp, strlen(tmp));
 		UnixFileClose(o, false);
 	}
+#else /* FUZZING */
+    /* This function is disabled in fuzzing mode */
+    abort();
+#endif /* FUZZING */
 }
 
 // Raise the priority of the process
 void UnixSetHighPriority()
 {
+#ifndef FUZZING
 	if (high_process == false)
 	{
 		UINT pid = getpid();
@@ -998,20 +1043,24 @@ void UnixSetHighPriority()
 		setpriority(PRIO_PROCESS, pid, -20);
 		setpriority(PRIO_PGRP, pgid, -20);
 	}
+#endif
 }
 
 // Restore the priority of the process
 void UnixRestorePriority()
 {
+#ifndef FUZZING
 	if (high_process != false)
 	{
 		high_process = false;
 		nice(20);
 	}
+#endif
 }
 
 UINT UnixGetNumberOfCpuInner()
 {
+#ifndef FUZZING
 	BUF *b;
 	UINT ret = 0;
 
@@ -1065,6 +1114,10 @@ UINT UnixGetNumberOfCpuInner()
 	}
 
 	return ret;
+#else /* FUZZING */
+    /* This function is disabled in fuzzing mode */
+    abort();
+#endif /* FUZZING */
 }
 
 // Get the product ID
@@ -1146,7 +1199,11 @@ void UnixGetOsInfo(OS_INFO *info)
 		info->OsProductName = CopyStr("Linux");
 	}
 
+#ifndef FUZZING
 	if (info->OsType == OSTYPE_LINUX)
+#else
+    if ( 0 )
+#endif
 	{
 		// Get the distribution name on Linux
 		BUF *b;
@@ -1218,6 +1275,7 @@ bool UnixRunW(wchar_t *filename, wchar_t *arg, bool hide, bool wait)
 }
 bool UnixRun(char *filename, char *arg, bool hide, bool wait)
 {
+#ifndef FUZZING
 	TOKEN_LIST *t;
 	UINT ret;
 	// Validate arguments
@@ -1295,11 +1353,16 @@ bool UnixRun(char *filename, char *arg, bool hide, bool wait)
 
 		return true;
 	}
+#else
+    /* This function is disabled in fuzzing mode */
+    abort();
+#endif
 }
 
 // Initialize the daemon
 void UnixDaemon(bool debug_mode)
 {
+#ifndef FUZZING
 	UINT ret;
 
 	if (debug_mode)
@@ -1332,11 +1395,16 @@ void UnixDaemon(bool debug_mode)
 		// Terminate the parent process
 		exit(0);
 	}
+#else
+    /* This function is disabled in fuzzing mode */
+    abort();
+#endif
 }
 
 // Close the standard I/O
 void UnixCloseIO()
 {
+#ifndef FUZZING
 	static bool close_io_first = false;
 
 	// Execute only once
@@ -1354,6 +1422,10 @@ void UnixCloseIO()
 		dup2(0, 2);
 		close_io_first = false;
 	}
+#else
+    /* This function is disabled in fuzzing mode */
+    abort();
+#endif
 }
 
 // Change the file name
@@ -1370,6 +1442,7 @@ bool UnixFileRenameW(wchar_t *old_name, wchar_t *new_name)
 }
 bool UnixFileRename(char *old_name, char *new_name)
 {
+#ifndef FUZZING
 	// Validate arguments
 	if (old_name == NULL || new_name == NULL)
 	{
@@ -1382,6 +1455,10 @@ bool UnixFileRename(char *old_name, char *new_name)
 	}
 
 	return true;
+#else
+    /* This function is disabled in fuzzing mode */
+    abort();
+#endif
 }
 
 // Get the call stack
@@ -1410,6 +1487,7 @@ bool UnixDeleteDirW(wchar_t *name)
 }
 bool UnixDeleteDir(char *name)
 {
+#ifndef FUZZING
 	// Validate arguments
 	if (name == NULL)
 	{
@@ -1422,6 +1500,10 @@ bool UnixDeleteDir(char *name)
 	}
 
 	return true;
+#else
+    /* This function is disabled in fuzzing mode */
+    abort();
+#endif
 }
 
 // Create a directory
@@ -1436,6 +1518,7 @@ bool UnixMakeDirW(wchar_t *name)
 }
 bool UnixMakeDir(char *name)
 {
+#ifndef FUZZING
 	// Validate arguments
 	if (name == NULL)
 	{
@@ -1448,6 +1531,10 @@ bool UnixMakeDir(char *name)
 	}
 
 	return true;
+#else
+    /* This function is disabled in fuzzing mode */
+    abort();
+#endif
 }
 
 // Delete the file
@@ -1464,6 +1551,7 @@ bool UnixFileDeleteW(wchar_t *name)
 }
 bool UnixFileDelete(char *name)
 {
+#ifndef FUZZING
 	// Validate arguments
 	if (name == NULL)
 	{
@@ -1476,11 +1564,16 @@ bool UnixFileDelete(char *name)
 	}
 
 	return true;
+#else
+    /* This function is disabled in fuzzing mode */
+    abort();
+#endif
 }
 
 // Seek the file
 bool UnixFileSeek(void *pData, UINT mode, int offset)
 {
+#ifndef FUZZING
 	UNIXIO *p;
 	UINT ret;
 	// Validate arguments
@@ -1503,11 +1596,16 @@ bool UnixFileSeek(void *pData, UINT mode, int offset)
 	}
 
 	return true;
+#else
+    /* This function is disabled in fuzzing mode */
+    abort();
+#endif
 }
 
 // Get the file size
 UINT64 UnixFileSize(void *pData)
 {
+#ifndef FUZZING
 	struct stat st;
 	UNIXIO *p;
 	int r;
@@ -1527,11 +1625,16 @@ UINT64 UnixFileSize(void *pData)
 	}
 
 	return (UINT64)st.st_size;
+#else
+    /* This function is disabled in fuzzing mode */
+    abort();
+#endif
 }
 
 // Write to the file
 bool UnixFileWrite(void *pData, void *buf, UINT size)
 {
+#ifndef FUZZING
 	UNIXIO *p;
 	UINT ret;
 	// Validate arguments
@@ -1549,11 +1652,16 @@ bool UnixFileWrite(void *pData, void *buf, UINT size)
 	}
 
 	return true;
+#else
+    /* This function is disabled in fuzzing mode */
+    abort();
+#endif
 }
 
 // Read from the file
 bool UnixFileRead(void *pData, void *buf, UINT size)
 {
+#ifndef FUZZING
 	UNIXIO *p;
 	UINT ret;
 	// Validate arguments
@@ -1571,11 +1679,16 @@ bool UnixFileRead(void *pData, void *buf, UINT size)
 	}
 
 	return true;
+#else
+    /* This function is disabled in fuzzing mode */
+    abort();
+#endif
 }
 
 // Flush to the file
 void UnixFileFlush(void *pData)
 {
+#ifndef FUZZING
 	UNIXIO *p;
 	bool write_mode;
 	// Validate arguments
@@ -1592,11 +1705,16 @@ void UnixFileFlush(void *pData)
 	{
 		fsync(p->fd);
 	}
+#else
+    /* This function is disabled in fuzzing mode */
+    abort();
+#endif
 }
 
 // Close the file
 void UnixFileClose(void *pData, bool no_flush)
 {
+#ifndef FUZZING
 	UNIXIO *p;
 	bool write_mode;
 	// Validate arguments
@@ -1622,6 +1740,10 @@ void UnixFileClose(void *pData, bool no_flush)
 	{
 		//sync();
 	}
+#else
+    /* This function is disabled in fuzzing mode */
+    abort();
+#endif
 }
 
 // Create a file
@@ -1638,6 +1760,7 @@ void *UnixFileCreateW(wchar_t *name)
 }
 void *UnixFileCreate(char *name)
 {
+#ifndef FUZZING
 	UNIXIO *p;
 	int fd;
 	// Validate arguments
@@ -1658,6 +1781,10 @@ void *UnixFileCreate(char *name)
 	p->write_mode = true;
 
 	return (void *)p;
+#else
+    /* This function is disabled in fuzzing mode */
+    abort();
+#endif
 }
 
 // Open the file
@@ -1674,6 +1801,7 @@ void *UnixFileOpenW(wchar_t *name, bool write_mode, bool read_lock)
 }
 void *UnixFileOpen(char *name, bool write_mode, bool read_lock)
 {
+#ifndef FUZZING
 	UNIXIO *p;
 	int fd;
 	int mode;
@@ -1705,6 +1833,10 @@ void *UnixFileOpen(char *name, bool write_mode, bool read_lock)
 	p->write_mode = write_mode;
 
 	return (void *)p;
+#else
+    /* This function is disabled in fuzzing mode */
+    abort();
+#endif
 }
 
 // Return the current thread ID
@@ -2129,6 +2261,7 @@ void UnixGetSystemTime(SYSTEMTIME *system_time)
 // Get the system timer (64bit)
 UINT64 UnixGetTick64()
 {
+#ifndef FUZZING
 #if	defined(OS_WIN32) || defined(CLOCK_REALTIME) || defined(CLOCK_MONOTONIC) || defined(CLOCK_HIGHRES)
 
 	struct timespec t;
@@ -2180,6 +2313,10 @@ UINT64 UnixGetTick64()
 #endif
 
 #endif
+#else
+    /* This function is disabled in fuzzing mode */
+    abort();
+#endif
 }
 
 // Get the system timer
@@ -2191,29 +2328,41 @@ UINT UnixGetTick()
 // Memory allocation
 void *UnixMemoryAlloc(UINT size)
 {
+#ifndef FUZZING
 	void *r;
 	pthread_mutex_lock(&malloc_lock);
 	r = malloc(size);
 	pthread_mutex_unlock(&malloc_lock);
 	return r;
+#else
+    return malloc(size);
+#endif
 }
 
 // Reallocation of the memory
 void *UnixMemoryReAlloc(void *addr, UINT size)
 {
+#ifndef FUZZING
 	void *r;
 	pthread_mutex_lock(&malloc_lock);
 	r = realloc(addr, size);
 	pthread_mutex_unlock(&malloc_lock);
 	return r;
+#else
+    return realloc(addr, size);
+#endif
 }
 
 // Free the memory
 void UnixMemoryFree(void *addr)
 {
+#ifndef FUZZING
 	pthread_mutex_lock(&malloc_lock);
 	free(addr);
 	pthread_mutex_unlock(&malloc_lock);
+#else
+    free(addr);
+#endif
 }
 
 // SIGCHLD handler
@@ -2243,7 +2392,9 @@ void UnixInit()
 		max_memory = UNIX_MAX_MEMORY_64;
 	}
 
+#ifndef FUZZING
 	UnixInitSolarisSleep();
+#endif
 
 	// Global lock
 	pthread_mutex_init(&get_time_lock, NULL);
@@ -2288,6 +2439,7 @@ void UnixInit()
 	UnixSetResourceLimit(RLIMIT_NPROC, UNIX_MAX_CHILD_PROCESSES);
 #endif	// RLIMIT_NPROC
 
+#ifndef FUZZING
 	// Write a value to the threads-max of the proc file system
 	o = UnixFileCreate("/proc/sys/kernel/threads-max");
 	if (o != NULL)
@@ -2297,6 +2449,7 @@ void UnixInit()
 		UnixFileWrite(o, tmp, strlen(tmp));
 		UnixFileClose(o, false);
 	}
+#endif
 
 	// Set the signals that is to be ignored
 	signal(SIGPIPE, SIG_IGN);

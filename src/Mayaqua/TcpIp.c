@@ -290,7 +290,11 @@ ICMP_RESULT *IcmpEchoSendBySocket(IP *dest_ip, UCHAR ttl, UCHAR *data, UINT size
 		ttl = 127;
 	}
 
+#ifndef FUZZING
 	s = NewUDP4(MAKE_SPECIAL_PORT(IP_PROTO_ICMPV4), NULL);
+#else
+    s = (SOCK*)8;
+#endif
 	if (s != NULL)
 	{
 		// Construction of the ICMP packet
@@ -326,7 +330,9 @@ ICMP_RESULT *IcmpEchoSendBySocket(IP *dest_ip, UCHAR ttl, UCHAR *data, UINT size
 		send_icmp_header->Checksum = IpChecksum(send_buffer, send_buffer_size);
 
 		// Send an ICMP
+#ifndef FUZZING
 		SetTtl(s, ttl);
+#endif
 		sent_tick = TickHighres64();
 		i = SendTo(s, dest_ip, MAKE_SPECIAL_PORT(IP_PROTO_ICMPV4), send_buffer, send_buffer_size);
 
@@ -345,12 +351,17 @@ ICMP_RESULT *IcmpEchoSendBySocket(IP *dest_ip, UCHAR ttl, UCHAR *data, UINT size
 				UINT interval = GetNextIntervalForInterrupt(interrupt);
 				IP src_ip;
 				UINT src_port;
+#ifdef FUZZING
+                int do_break = 0;
+#endif
+#ifndef FUZZING
 				SOCKSET set;
 
 				InitSockSet(&set);
 				AddSockSet(&set, s);
 
 				Select(&set, interval, NULL, NULL);
+#endif
 
 				while (true)
 				{
@@ -369,10 +380,18 @@ ICMP_RESULT *IcmpEchoSendBySocket(IP *dest_ip, UCHAR ttl, UCHAR *data, UINT size
 					}
 					else
 					{
+#ifdef FUZZING
+                        do_break = 1;
+#endif
 						break;
 					}
 				}
 
+#ifdef FUZZING
+                if ( do_break ) {
+                    break;
+                }
+#endif
 				if (interval == 0)
 				{
 					break;
@@ -397,7 +416,9 @@ ICMP_RESULT *IcmpEchoSendBySocket(IP *dest_ip, UCHAR ttl, UCHAR *data, UINT size
 		}
 
 		Free(send_buffer);
+#ifndef FUZZING
 		ReleaseSock(s);
+#endif
 	}
 
 	return ret;
@@ -874,7 +895,11 @@ DHCPV4_DATA *ParseDHCPv4Data(PKT *pkt)
 	DHCPV4_DATA *d;
 	UCHAR *data;
 	UINT size;
+#ifndef FUZZING
 	UINT magic_cookie = Endian32(DHCP_MAGIC_COOKIE);
+#else
+	UINT magic_cookie = Endian32(0);
+#endif
 	bool ok = false;
 	DHCP_OPTION *o;
 	// Validate arguments
@@ -3334,7 +3359,12 @@ USHORT IpChecksum(void *buf, UINT size)
 
 	answer = ~sum;
 
+#ifndef FUZZING
 	return answer;
+#else
+    /* Make it easier for the fuzzer to find checksum matches */
+    return answer & 0x3;
+#endif
 }
 
 // Convert a DHCP option list into a buffer

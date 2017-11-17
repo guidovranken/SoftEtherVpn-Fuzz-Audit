@@ -186,6 +186,7 @@ UINT64 TickToTime(UINT64 tick)
 // Get the Tick value
 UINT64 Tick64()
 {
+#ifndef FUZZING
 #ifdef	OS_WIN32
 	return Win32FastTick64();
 #else	// OS_WIN32
@@ -201,11 +202,19 @@ UINT64 Tick64()
 	Unlock(tk64->TickLock);
 	return tick64;
 #endif	// OS_WIN32
+#else /* FUZZING */
+    /* This is the "backup" value if Recv fails due to insufficient input data */
+    UINT64 ret = 0x1111111111111111;
+    Recv((SOCK*)8, &ret, sizeof(ret), false);
+    /* TODO variable return value */
+    return ret;
+#endif
 }
 
 // Real-time clock measuring thread
 void Tick64Thread(THREAD *thread, void *param)
 {
+#ifndef FUZZING
 	UINT n = 0;
 	bool first = false;
 	bool create_first_entry = true;
@@ -336,6 +345,10 @@ void Tick64Thread(THREAD *thread, void *param)
 		SleepThread(tick_span);
 #endif	// OS_WIN32
 	}
+#else /* FUZZING */
+    /* This function is disabled in fuzzing mode */
+    abort();
+#endif /* FUZZING */
 }
 
 // Get the absolute value of the difference between the two 64 bit integers

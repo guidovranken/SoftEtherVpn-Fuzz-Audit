@@ -1175,6 +1175,7 @@ UINT DoNothing()
 // Thread creation (pool)
 THREAD *NewThreadNamed(THREAD_PROC *thread_proc, void *param, char *name)
 {
+#ifndef FUZZING
 	THREAD *host = NULL;
 	THREAD_POOL_DATA *pd = NULL;
 	THREAD *ret;
@@ -1246,6 +1247,9 @@ THREAD *NewThreadNamed(THREAD_PROC *thread_proc, void *param, char *name)
 //	Debug("current_num_thread = %u\n", current_num_thread);
 
 	return ret;
+#else /* FUZZING */
+    abort();
+#endif
 }
 
 // Clean up of thread (pool)
@@ -1332,6 +1336,7 @@ void WaitThreadInit(THREAD *t)
 // Wait for the termination of the thread (pool)
 bool WaitThread(THREAD *t, UINT timeout)
 {
+#ifndef FUZZING
 	bool ret = false;
 	EVENT *e = NULL;
 	// Validate arguments
@@ -1375,6 +1380,8 @@ bool WaitThread(THREAD *t, UINT timeout)
 	}
 
 	return ret;
+#endif
+    return true;
 }
 
 // Get Thread ID
