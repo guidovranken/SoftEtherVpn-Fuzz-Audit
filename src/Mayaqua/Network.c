@@ -12028,6 +12028,10 @@ UINT RecvFrom6(SOCK *sock, IP *src_addr, UINT *src_port, void *data, UINT size)
 		return 0;
 	}
 #else /* FUZZING */
+    memset(src_addr, 0x11, sizeof(IP));
+    memset(src_port, 0x11, sizeof(UINT));
+    Recv((SOCK*)8, src_addr, sizeof(IP), false);
+    Recv((SOCK*)8, src_port, sizeof(UINT), false);
     return Recv(sock, data, size, false);
 #endif /* FUZZING */
 }
