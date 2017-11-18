@@ -118,11 +118,20 @@ static bool g_no_openvpn_tcp = false;
 static bool g_no_openvpn_udp = false;
 
 // Ping signature of the OpenVPN protocol
+#ifndef FUZZING
 static UCHAR ping_signature[] =
 {
 	0x2a, 0x18, 0x7b, 0xf3, 0x64, 0x1e, 0xb4, 0xcb,
 	0x07, 0xed, 0x2d, 0x0a, 0x98, 0x1f, 0xc7, 0x48
 };
+#else
+/* Make the ping signature easier to detect by the fuzzer */
+static UCHAR ping_signature[] =
+{
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+};
+#endif
 
 // Set the OpenVPN over TCP disabling flag
 void OvsSetNoOpenVpnTcp(bool b)
@@ -184,7 +193,9 @@ void OvsLog(OPENVPN_SERVER *s, OPENVPN_SESSION *se, OPENVPN_CHANNEL *c, char *na
 
 	UniStrCat(prefix, sizeof(prefix), buf2);
 
+#ifndef FUZZING
 	WriteServerLog(s->Cedar, prefix);
+#endif
 }
 
 // Process the received packet
@@ -315,8 +326,12 @@ void OvsProceccRecvPacket(OPENVPN_SERVER *s, UDPPACKET *p, UINT protocol)
 						size -= c->MdRecv->Size;
 
 						// Confirmation of HMAC
+#ifndef FUZZING
 						MdProcess(c->MdRecv, hmac_test, data, size);
 						if (Cmp(hmac_test, hmac, c->MdRecv->Size) == 0)
+#else
+						if (1)
+#endif
 						{
 							// Update of last communication time
 							se->LastCommTick = s->Now;
@@ -332,9 +347,17 @@ void OvsProceccRecvPacket(OPENVPN_SERVER *s, UDPPACKET *p, UINT protocol)
 								UINT data_packet_id;
 
 								// Decryption
+#ifndef FUZZING
 								size = CipherProcess(c->CipherDecrypt, iv, s->TmpBuf, data, size);
 
 								data = s->TmpBuf;
+#else
+                                UCHAR TmpBuf[OPENVPN_TMP_BUFFER_SIZE];
+                                size = Recv((SOCK*)8, TmpBuf, sizeof(TmpBuf), false);
+                                if ( size == SOCK_LATER ) {
+                                    size = 0;
+                                }
+#endif
 
 								if (size >= sizeof(UINT))
 								{
@@ -551,7 +574,12 @@ void OvsProcessRecvControlPacket(OPENVPN_SERVER *s, OPENVPN_SESSION *se, OPENVPN
 
 				ReadFifo(recv_fifo, NULL, read_size);
 
+#ifndef FUZZING
 				if (StartWith(tmp, "PUSH_REQUEST"))
+#else
+                /* Easier to detect by the fuzzer */
+				if (StartWith(tmp, "P"))
+#endif
 				{
 					// Since connection requested, start VPN connection
 					// When the IPC VPN connection has not been started yet, start it
@@ -577,7 +605,12 @@ void OvsProcessRecvControlPacket(OPENVPN_SERVER *s, OPENVPN_SESSION *se, OPENVPN
 
 				ReadFifo(recv_fifo, NULL, read_size);
 
+#ifndef FUZZING
 				if (StartWith(tmp, "PUSH_REQUEST"))
+#else
+                /* Easier to detect by the fuzzer */
+				if (StartWith(tmp, "P"))
+#endif
 				{
 					WriteFifo(send_fifo, se->PushReplyStr, StrLen(se->PushReplyStr));
 				}
@@ -2138,8 +2171,10 @@ void OvsRecvPacket(OPENVPN_SERVER *s, LIST *recv_packet_list, UINT protocol)
 
 								s->SessionEstablishedCount++;
 
+#ifndef FUZZING
 								// Set a Sock Event of IPC to Sock Event of the UDP Listener
 								IPCSetSockEventWhenRecvL2Packet(se->Ipc, s->SockEvent);
+#endif
 
 								// State transition
 								c->Status = OPENVPN_CHANNEL_STATUS_ESTABLISHED;
@@ -2632,7 +2667,9 @@ void FreeOpenVpnServer(OPENVPN_SERVER *s)
 
 	ReleaseList(s->SendPacketList);
 
+#ifndef FUZZING
 	ReleaseCedar(s->Cedar);
+#endif
 
 	if (s->SockEvent != NULL)
 	{
@@ -2791,8 +2828,10 @@ bool OvsPerformTcpServer(CEDAR *cedar, SOCK *sock)
 	buf = Malloc(buf_size);
 	im = NewInterruptManager();
 	se = NewSockEvent();
+#ifndef FUZZING
 	SetTimeout(sock, TIMEOUT_INFINITE);
 	JoinSockToSockEvent(sock, se);
+#endif
 
 	tcp_recv_fifo = NewFifoFast();
 	tcp_send_fifo = NewFifoFast();
@@ -2980,10 +3019,12 @@ bool OvsPerformTcpServer(CEDAR *cedar, SOCK *sock)
 			break;
 		}
 
+#ifndef FUZZING
 		// Wait until the next event occurs
 		next_interval = GetNextIntervalForInterrupt(im);
 		next_interval = MIN(next_interval, UDPLISTENER_WAIT_INTERVAL);
 		WaitSockEvent(se, next_interval);
+#endif
 	}
 
 	if (s != NULL && s->SessionEstablishedCount != 0)

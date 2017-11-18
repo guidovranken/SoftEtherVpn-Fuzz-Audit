@@ -217,6 +217,7 @@ void SstpProcessDataPacket(SSTP_SERVER *s, SSTP_PACKET *p)
 
 	//Debug("SSTP Data Packet Recv: Size = %u\n", p->DataSize);
 
+#ifndef FUZZING
 	if (s->PPPThread == NULL)
 	{
 		// Create a thread to initialize the new PPP module
@@ -227,6 +228,9 @@ void SstpProcessDataPacket(SSTP_SERVER *s, SSTP_PACKET *p)
 
 	// Pass the received data to the PPP module
 	TubeSendEx(s->TubeRecv, p->Data, p->DataSize, NULL, true);
+#else
+	TubeSendEx((TUBE*)8, p->Data, p->DataSize, NULL, true);
+#endif
 	s->FlushRecvTube = true;
 }
 
@@ -335,6 +339,7 @@ void SstpProcessInterrupt(SSTP_SERVER *s)
 	// Transmit a packet that the PPP module is trying to send via the SSTP
 	while (true)
 	{
+#ifndef FUZZING
 		TUBEDATA *d = TubeRecvAsync(s->TubeSend);
 		SSTP_PACKET *p;
 		if (d == NULL)
@@ -343,12 +348,24 @@ void SstpProcessInterrupt(SSTP_SERVER *s)
 		}
 
 		p = SstpNewDataPacket(d->Data, d->DataSize);
+#else
+        unsigned char recvbuf[10240];
+		SSTP_PACKET *p;
+        UINT r;
+        r = Recv((SOCK*)1, recvbuf, sizeof(recvbuf), true);
+        if ( r == 0 || r == SOCK_LATER ) {
+            break;
+        }
+		p = SstpNewDataPacket(recvbuf, r);
+#endif
 
 		SstpSendPacket(s, p);
 
 		SstpFreePacket(p);
 
+#ifndef FUZZING
 		FreeTubeData(d);
+#endif
 	}
 
 	if (s->Status == SSTP_SERVER_STATUS_ESTABLISHED)
@@ -1178,7 +1195,9 @@ bool ProcessSstpHttps(CEDAR *cedar, SOCK *s, SOCK_EVENT *se)
 		{
 			UINT select_time = SELECT_TIME;
 			UINT r = GetNextIntervalForInterrupt(sstp->Interrupt);
+#ifndef FUZZING
 			WaitSockEvent(se, MIN(r, select_time));
+#endif
 		}
 	}
 
@@ -1234,7 +1253,9 @@ bool AcceptSstp(CONNECTION *c)
 
 		se = NewSockEvent();
 
+#ifndef FUZZING
 		JoinSockToSockEvent(s, se);
+#endif
 
 		Debug("ProcessSstpHttps Start.\n");
 		ret2 = ProcessSstpHttps(c->Cedar, s, se);

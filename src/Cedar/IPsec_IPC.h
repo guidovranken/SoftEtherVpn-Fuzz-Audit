@@ -220,7 +220,12 @@ struct IPC_MSCHAP_V2_AUTHINFO
 	UCHAR MsChapV2_ClientResponse[24];	// MS-CHAPv2 Client Response
 	EAP_CLIENT *MsChapV2_EapClient;		// EAP client
 };
-
+#ifdef FUZZING
+IPC *FuzzingNewIPC(CEDAR *cedar, char *client_name, char *postfix, char *hubname, char *username, char *password,
+			UINT *error_code, IP *client_ip, UINT client_port, IP *server_ip, UINT server_port,
+			char *client_hostname, char *crypt_name,
+			bool bridge_mode, UINT mss, EAP_CLIENT *eap_client);
+#endif
 IPC *NewIPC(CEDAR *cedar, char *client_name, char *postfix, char *hubname, char *username, char *password,
 			UINT *error_code, IP *client_ip, UINT client_port, IP *server_ip, UINT server_port,
 			char *client_hostname, char *crypt_name,

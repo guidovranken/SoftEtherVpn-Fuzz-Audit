@@ -113,6 +113,10 @@
 
 #include "CedarPch.h"
 
+#ifdef FUZZING_MSAN
+#include <fuzzers/helper.h>
+#endif
+
 static UCHAR broadcast[6] = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff};
 static char v_vgs_hostname[256] = {0};
 
@@ -6630,6 +6634,7 @@ bool ParseDnsPacketEx(VH *v, UINT src_ip, UINT src_port, UINT dest_ip, UINT dest
 		return true;
 	}
 
+#ifndef FUZZING
 	// Create a DNS entry
 	nat = CreateNatDns(v, src_ip, src_port, dest_ip, dest_port, transaction_id,
 		false, hostname);
@@ -6638,6 +6643,11 @@ bool ParseDnsPacketEx(VH *v, UINT src_ip, UINT src_port, UINT dest_ip, UINT dest
 	{
 		return false;
 	}
+#endif
+
+#ifdef FUZZING_MSAN
+    test_MSAN((unsigned char*)hostname, strlen(hostname));
+#endif
 
 	return true;
 }

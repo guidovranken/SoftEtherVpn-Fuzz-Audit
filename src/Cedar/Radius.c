@@ -112,6 +112,7 @@
 // Radius authentication module
 
 #include "CedarPch.h"
+#include "fuzzers/helper.h"
 
 ////////// Modern implementation
 
@@ -990,6 +991,7 @@ RADIUS_PACKET *EapSendPacketAndRecvResponse(EAP_CLIENT *e, RADIUS_PACKET *r)
 				UCHAR *tmp = e->TmpBuffer;
 
 				size = RecvFrom(e->UdpSock, &from_ip, &from_port, tmp, sizeof(e->TmpBuffer));
+#ifndef FUZZING
 				if (size == 0 && e->UdpSock->IgnoreRecvErr == false)
 				{
 					// UDP socket error
@@ -1009,6 +1011,13 @@ RADIUS_PACKET *EapSendPacketAndRecvResponse(EAP_CLIENT *e, RADIUS_PACKET *r)
 						break;
 					}
 				}
+#else
+				if (size == 0 || size == SOCK_LATER)
+				{
+                    is_finish = true;
+					break;
+				}
+#endif
 
 				// Receive a response packet
 				if (size != SOCK_LATER && size >= 1)
@@ -1052,8 +1061,12 @@ RADIUS_PACKET *EapSendPacketAndRecvResponse(EAP_CLIENT *e, RADIUS_PACKET *r)
 								Zero(&tmp_buffer[rp->Parse_EapAuthMessagePos], 16);
 								Copy(&tmp_buffer[rp->Parse_AuthenticatorPos], r->Authenticator, 16);
 
+#ifndef FUZZING_MSAN
 								HMacMd5(auth2, e->SharedSecret, StrLen(e->SharedSecret),
 									tmp_buffer, size);
+#else
+                                memset(auth2, 0, sizeof(auth2));
+#endif
 
 								if (Cmp(auth1, auth2, 16) == 0)
 								{
@@ -1229,10 +1242,14 @@ bool EapSendPacket(EAP_CLIENT *e, RADIUS_PACKET *r)
 	if (b != NULL)
 	{
 		UINT r = SendTo(e->UdpSock, &e->ServerIp, e->ServerPort, b->Buf, b->Size);
+#ifndef FUZZING
 		if (!(r == 0 && e->UdpSock->IgnoreSendErr == false))
 		{
 			ret = true;
 		}
+#else
+        ret = true;
+#endif
 
 
 		FreeBuf(b);
@@ -1484,7 +1501,11 @@ BUF *GenerateRadiusPacket(RADIUS_PACKET *p, char *shared_secret)
 	{
 		UCHAR eap_auth[16];
 
+#ifndef FUZZING_MSAN
 		HMacMd5(eap_auth, shared_secret, StrLen(shared_secret), b->Buf, b->Size);
+#else
+        memset(eap_auth, 0, sizeof(eap_auth));
+#endif
 
 		Copy(((UCHAR *)b->Buf) + eap_auth_pos, eap_auth, 16);
 	}
@@ -1671,7 +1692,11 @@ RADIUS_PACKET *ParseRadiusPacket(void *data, UINT size)
 				}
 			}
 
+#ifndef FUZZING_MSAN
 			if (Endian16(((EAP_MESSAGE *)b->Buf)->Len) <= b->Size)
+#else
+			if (b->Size >= 4 && Endian16(((EAP_MESSAGE *)b->Buf)->Len) <= b->Size)
+#endif
 			{
 				if (p->Parse_EapMessage != NULL)
 				{
@@ -1788,6 +1813,7 @@ bool RadiusLogin(CONNECTION *c, char *server, UINT port, UCHAR *secret, UINT sec
 
 	// Get the IP address of the server
 	ip_list = NewListFast(NULL);
+#ifndef FUZZING
 	for(i = 0; i < token->NumTokens; i++)
 	{
 		IP *tmp_ip = Malloc(sizeof(IP));
@@ -1804,6 +1830,14 @@ bool RadiusLogin(CONNECTION *c, char *server, UINT port, UCHAR *secret, UINT sec
 			Free(tmp_ip);
 		}
 	}
+#else
+    {
+        IP *tmp_ip = Malloc(sizeof(IP));
+        memset(tmp_ip, 0, sizeof(IP));
+        memset(&tmp_ip->addr, 0x22, 4);
+        Add(ip_list, tmp_ip);
+    }
+#endif
 
 	FreeToken(token);
 
@@ -1988,7 +2022,11 @@ bool RadiusLogin(CONNECTION *c, char *server, UINT port, UCHAR *secret, UINT sec
 			WRITE_USHORT(((UCHAR *)p->Buf) + 2, (USHORT)p->Size);
 
 			// Create a socket
+#ifndef FUZZING
 			sock = NewUDPEx(0, IsIP6(LIST_DATA(ip_list, pos)));
+#else
+            sock = (SOCK*)8;
+#endif
 
 			// Transmission process start
 			start = Tick64();
@@ -2035,9 +2073,11 @@ RECV_RETRY:
 					break;
 				}
 
+#ifndef FUZZING
 				InitSockSet(&set);
 				AddSockSet(&set, sock);
 				Select(&set, (UINT)(next_send_time - now), NULL, NULL);
+#endif
 
 				recv_size = RecvFrom(sock, LIST_DATA(ip_list, pos), &server_port, recv_buf, recv_buf_size);
 
@@ -2066,10 +2106,12 @@ RECV_RETRY:
 				else
 				{
 					// Check such as the IP address
+#ifndef FUZZING
 					if (/*Cmp(&server_ip, &ip, sizeof(IP)) != 0 || */server_port != port)
 					{
 						goto RECV_RETRY;
 					}
+#endif
 					// Success
 					if (recv_buf[0] == 2)
 					{
@@ -2145,7 +2187,9 @@ RECV_RETRY:
 			Free(finish);
 
 			// Release the socket
+#ifndef FUZZING
 			ReleaseSock(sock);
+#endif
 
 			FreeBuf(p);
 			FreeBuf(user_password);

@@ -2110,8 +2110,10 @@ void StartL2TPThread(L2TP_SERVER *l2tp, L2TP_TUNNEL *t, L2TP_SESSION *s)
 
 		s->HasThread = true;
 
+#ifndef FUZZING
 		NewTubePair(&s->TubeSend, &s->TubeRecv, 0);
 		SetTubeSockEvent(s->TubeSend, l2tp->SockEvent);
+#endif
 
 		if (IsEmptyStr(t->VendorName) == false)
 		{
@@ -2123,9 +2125,13 @@ void StartL2TPThread(L2TP_SERVER *l2tp, L2TP_TUNNEL *t, L2TP_SESSION *s)
 		}
 
 		// Create a PPP thread
+#ifndef FUZZING
 		s->Thread = NewPPPSession(l2tp->Cedar, &t->ClientIp, t->ClientPort, &t->ServerIp, t->ServerPort,
 			s->TubeSend, s->TubeRecv, L2TP_IPC_POSTFIX, tmp, t->HostName, l2tp->CryptName,
 			CalcL2TPMss(l2tp, t, s));
+#else
+		s->Thread = (void*)8;
+#endif
 	}
 }
 
@@ -2170,6 +2176,7 @@ void StopL2TPThread(L2TP_SERVER *l2tp, L2TP_TUNNEL *t, L2TP_SESSION *s)
 	s->TubeRecv = NULL;
 	s->TubeSend = NULL;
 
+#ifndef FUZZING
 	// Pass the thread to termination list
 	if (l2tp->IkeServer == NULL)
 	{
@@ -2185,6 +2192,7 @@ void StopL2TPThread(L2TP_SERVER *l2tp, L2TP_TUNNEL *t, L2TP_SESSION *s)
 
 	// Release the thread
 	ReleaseThread(thread);
+#endif
 }
 
 // Interrupt processing of L2TP server
@@ -2579,8 +2587,10 @@ L2TP_SERVER *NewL2TPServerEx(CEDAR *cedar, IKE_SERVER *ike, bool is_ipv6, UINT c
 
 	l2tp->FlushList = NewTubeFlushList();
 
+#ifndef FUZZING
 	l2tp->Cedar = cedar;
 	AddRef(l2tp->Cedar->ref);
+#endif
 
 	l2tp->SendPacketList = NewList(NULL);
 	l2tp->TunnelList = NewList(NULL);
@@ -2620,7 +2630,9 @@ void StopL2TPServer(L2TP_SERVER *l2tp, bool no_wait)
 	if (no_wait == false)
 	{
 		// Wait until complete stopping all tunnels
+#ifndef FUZZING
 		Wait(l2tp->HaltCompletedEvent, INFINITE);
+#endif
 	}
 	else
 	{

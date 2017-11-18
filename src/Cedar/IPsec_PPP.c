@@ -113,6 +113,10 @@
 
 #include "CedarPch.h"
 
+#ifdef FUZZING
+#define MAX_ITERATIONS 10
+#endif
+
 // PPP thread
 void PPPThread(THREAD *thread, void *param)
 {
@@ -125,6 +129,9 @@ void PPPThread(THREAD *thread, void *param)
 	bool ret = false;
 	char ipstr1[128], ipstr2[128];
 	bool established = false;
+#ifdef FUZZING
+    int iterations = 0;
+#endif
 	// Validate arguments
 	if (thread == NULL || param == NULL)
 	{
@@ -420,6 +427,12 @@ void PPPThread(THREAD *thread, void *param)
 			UINT64 now = Tick64();
 			UINT r;
 
+#ifdef FUZZING
+            iterations++;
+            if ( iterations == MAX_ITERATIONS ) {
+                goto LABEL_CLEANUP;
+            }
+#endif
 			// Flush the ARP table of the IPC
 			IPCFlushArpTable(p->Ipc);
 
@@ -427,6 +440,13 @@ void PPPThread(THREAD *thread, void *param)
 			while (true)
 			{
 				PPP_PACKET *pp = PPPRecvPacketForCommunication(p);
+#ifdef FUZZING
+                iterations++;
+                if ( iterations == MAX_ITERATIONS ) {
+                    FreePPPPacket(pp);
+                    break;
+                }
+#endif
 				if (pp == NULL)
 				{
 					break;
@@ -440,6 +460,11 @@ void PPPThread(THREAD *thread, void *param)
 
 				FreePPPPacket(pp);
 			}
+#ifdef FUZZING
+                if ( iterations == MAX_ITERATIONS ) {
+                    break;
+                }
+#endif
 
 			if (p->DhcpAllocated)
 			{
@@ -482,7 +507,18 @@ void PPPThread(THREAD *thread, void *param)
 
 				FreePPPPacketEx(pp, true);
 				Free(b);
+#ifdef FUZZING
+                iterations++;
+                if ( iterations == MAX_ITERATIONS ) {
+                    break;
+                }
+#endif
 			}
+#ifdef FUZZING
+                if ( iterations == MAX_ITERATIONS ) {
+                    break;
+                }
+#endif
 
 			FlushTubeFlushList(p->FlushList);
 
@@ -550,7 +586,9 @@ void PPPThread(THREAD *thread, void *param)
 		IPCDhcpFreeIP(p->Ipc, &ip);
 		IPCProcessL3Events(p->Ipc);
 
+#ifndef FUZZING
 		SleepThread(300);
+#endif
 	}
 
 LABEL_CLEANUP:
@@ -583,6 +621,9 @@ void PPPCleanTerminate(PPP_SESSION *p)
 	PPP_PACKET *pp;
 	PPP_PACKET *res;
 	UINT64 giveup_tick = Tick64() + (UINT64)PPP_TERMINATE_TIMEOUT;
+#ifdef FUZZING
+    int iterations = 0;
+#endif
 	// Validate arguments
 	if (p == NULL)
 	{
@@ -605,6 +646,12 @@ void PPPCleanTerminate(PPP_SESSION *p)
 	{
 		UINT64 now = Tick64();
 		UINT interval;
+#ifdef FUZZING
+        iterations++;
+        if ( iterations == MAX_ITERATIONS ) {
+            goto LABEL_CLEANUP;
+        }
+#endif
 
 		if (now >= giveup_tick)
 		{
@@ -613,6 +660,12 @@ void PPPCleanTerminate(PPP_SESSION *p)
 
 		while (true)
 		{
+#ifdef FUZZING
+            iterations++;
+            if ( iterations == MAX_ITERATIONS ) {
+                goto LABEL_CLEANUP;
+            }
+#endif
 			if (IsTubeConnected(p->TubeRecv) == false)
 			{
 				break;
@@ -637,7 +690,9 @@ void PPPCleanTerminate(PPP_SESSION *p)
 
 		interval = (UINT)(giveup_tick - now);
 
+#ifndef FUZZING
 		Wait(p->TubeRecv->Event, interval);
+#endif
 	}
 
 LABEL_CLEANUP:
@@ -852,6 +907,7 @@ bool PPPParseUsername(CEDAR *cedar, char *src_username, ETHERIP_ID *dst)
 	{
 		// Select the default Virtual HUB if the Virtual HUB name is not specified
 		StrCpy(token2, sizeof(token2), SERVER_DEFAULT_HUB_NAME);
+#ifndef FUZZING
 		if (cedar->Server != NULL && cedar->Server->IPsecServer != NULL)
 		{
 			Lock(cedar->Server->IPsecServer->LockSettings);
@@ -862,6 +918,7 @@ bool PPPParseUsername(CEDAR *cedar, char *src_username, ETHERIP_ID *dst)
 			}
 			Unlock(cedar->Server->IPsecServer->LockSettings);
 		}
+#endif
 
 	}
 
@@ -1016,9 +1073,15 @@ PPP_PACKET *PPPProcessRequestPacket(PPP_SESSION *p, PPP_PACKET *req)
 						eap_client_hex);
 
 					// Attempt to connect with IPC
+#ifndef FUZZING
 					ipc = NewIPC(p->Cedar, p->ClientSoftwareName, p->Postfix, hub, id, password,
 						&error_code, &p->ClientIP, p->ClientPort, &p->ServerIP, p->ServerPort,
 						p->ClientHostname, p->CryptName, false, p->AdjustMss, p->EapClient);
+#else
+					ipc = FuzzingNewIPC(p->Cedar, p->ClientSoftwareName, p->Postfix, hub, id, password,
+						&error_code, &p->ClientIP, p->ClientPort, &p->ServerIP, p->ServerPort,
+						p->ClientHostname, p->CryptName, false, p->AdjustMss, p->EapClient);
+#endif
 
 					if (ipc != NULL)
 					{
@@ -1149,10 +1212,16 @@ PPP_PACKET *PPPProcessRequestPacket(PPP_SESSION *p, PPP_PACKET *req)
 								// Attempt to connect with IPC
 								UINT error_code;
 
+#ifndef FUZZING
 								ipc = NewIPC(p->Cedar, p->ClientSoftwareName, p->Postfix, hub, id, password,
 									&error_code, &p->ClientIP, p->ClientPort, &p->ServerIP, p->ServerPort,
 									p->ClientHostname, p->CryptName, false, p->AdjustMss, NULL);
 
+#else
+								ipc = FuzzingNewIPC(p->Cedar, p->ClientSoftwareName, p->Postfix, hub, id, password,
+									&error_code, &p->ClientIP, p->ClientPort, &p->ServerIP, p->ServerPort,
+									p->ClientHostname, p->CryptName, false, p->AdjustMss, NULL);
+#endif
 								if (ipc != NULL)
 								{
 									p->Ipc = ipc;
@@ -1656,6 +1725,9 @@ PPP_PACKET *PPPRecvResponsePacket(PPP_SESSION *p, PPP_PACKET *req, USHORT expect
 	UINT64 next_resend = Tick64() + (UINT64)PPP_PACKET_RESEND_INTERVAL;
 	PPP_PACKET *ret = NULL;
 	USHORT tmp_us = 0;
+#ifdef FUZZING
+    int iterations = 0;
+#endif
 	// Validate arguments
 	if (p == NULL || req != NULL && req->Lcp == NULL)
 	{
@@ -1679,6 +1751,12 @@ PPP_PACKET *PPPRecvResponsePacket(PPP_SESSION *p, PPP_PACKET *req, USHORT expect
 	{
 		UINT64 now = Tick64();
 		UINT interval;
+#ifdef FUZZING
+        iterations++;
+        if ( iterations == MAX_ITERATIONS ) {
+            return NULL;
+        }
+#endif
 
 		if (IsTubeConnected(p->TubeRecv) == false)
 		{
@@ -1689,6 +1767,12 @@ PPP_PACKET *PPPRecvResponsePacket(PPP_SESSION *p, PPP_PACKET *req, USHORT expect
 		{
 			PPP_PACKET *pp;
 			PPP_PACKET *response;
+#ifdef FUZZING
+            iterations++;
+            if ( iterations == MAX_ITERATIONS ) {
+                return NULL;
+            }
+#endif
 
 			if (p->LastStoredPacket != NULL)
 			{
@@ -1725,6 +1809,7 @@ PPP_PACKET *PPPRecvResponsePacket(PPP_SESSION *p, PPP_PACKET *req, USHORT expect
 				}
 			}
 
+            
 			// Return a response immediately without processing if a protocol other than the expected received
 			if ((pp->IsControl && pp->Protocol != expected_protocol) || pp->IsControl == false)
 			{
@@ -1793,7 +1878,9 @@ PPP_PACKET *PPPRecvResponsePacket(PPP_SESSION *p, PPP_PACKET *req, USHORT expect
 					{
 						// Disconnect immediately if user authentication fails at least once in the PAP authentication protocol
 						Debug("Disconnecting because PAP failed.\n");
+#ifndef FUZZING
 						SleepThread(300);
+#endif
 						return NULL;
 					}
 
@@ -1801,7 +1888,9 @@ PPP_PACKET *PPPRecvResponsePacket(PPP_SESSION *p, PPP_PACKET *req, USHORT expect
 					{
 						// Disconnect immediately if it fails to user authentication at least once in the CHAP authentication protocol
 						Debug("Disconnecting because CHAP failed.\n");
+#ifndef FUZZING
 						SleepThread(300);
+#endif
 						return NULL;
 					}
 				}
@@ -1854,7 +1943,9 @@ PPP_PACKET *PPPRecvResponsePacket(PPP_SESSION *p, PPP_PACKET *req, USHORT expect
 			return NULL;
 		}
 
+#ifndef FUZZING
 		Wait(p->TubeRecv->Event, interval);
+#endif
 	}
 }
 
@@ -2024,7 +2115,9 @@ LABEL_LOOP:
 				return NULL;
 			}
 
+#ifndef FUZZING
 			SleepThread(100);
+#endif
 
 			FreePPPPacket(pp2);
 			goto LABEL_LOOP;
@@ -2039,6 +2132,11 @@ PPP_PACKET *PPPRecvPacket(PPP_SESSION *p, bool async)
 {
 	TUBEDATA *d;
 	PPP_PACKET *pp;
+#ifdef FUZZING
+    void* data;
+    unsigned char recvbuf[10240];
+    UINT ret;
+#endif
 	// Validate arguments
 	if (p == NULL)
 	{
@@ -2046,6 +2144,7 @@ PPP_PACKET *PPPRecvPacket(PPP_SESSION *p, bool async)
 	}
 
 LABEL_LOOP:
+#ifndef FUZZING
 
 	if (async == false)
 	{
@@ -2063,6 +2162,13 @@ LABEL_LOOP:
 
 	pp = ParsePPPPacket(d->Data, d->DataSize);
 	FreeTubeData(d);
+#else
+    ret = Recv((SOCK*)8, recvbuf, sizeof(recvbuf), false);
+    if ( ret == 0 || ret == SOCK_LATER ) {
+        return NULL;
+    }
+	pp = ParsePPPPacket(recvbuf, ret);
+#endif
 
 	if (pp == NULL)
 	{
@@ -2457,7 +2563,9 @@ void FreePPPSession(PPP_SESSION *p)
 	TubeDisconnect(p->TubeRecv);
 	TubeDisconnect(p->TubeSend);
 
+#ifndef FUZZING
 	ReleaseCedar(p->Cedar);
+#endif
 
 	ReleaseTube(p->TubeRecv);
 	ReleaseTube(p->TubeSend);
