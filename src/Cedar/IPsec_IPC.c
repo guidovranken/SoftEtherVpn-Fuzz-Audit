@@ -2386,12 +2386,12 @@ void IPCSendL2(IPC *ipc, void *data, UINT size)
 		return;
 	}
 
+#ifndef FUZZING
 	if (ipc->Sock == NULL)
 	{
 		return;
 	}
 
-#ifndef FUZZING
 	TubeSendEx(ipc->Sock->SendTube, data, size, NULL, true);
 	AddTubeToFlushList(ipc->FlushList, ipc->Sock->SendTube);
 #else

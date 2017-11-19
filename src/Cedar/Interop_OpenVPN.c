@@ -1490,9 +1490,15 @@ void OvsSendDataPacket(OPENVPN_CHANNEL *c, UCHAR key_id, UINT data_packet_id, vo
 	Copy(encrypted_data + sizeof(UINT), data, data_size);
 
 	// Prepare a buffer to store the results
+#ifndef FUZZING
 	dest_data = Malloc(sizeof(UCHAR) + c->MdSend->Size + c->CipherEncrypt->IvSize + encrypted_size + 256);
+#else
+	dest_size = sizeof(sizeof(UCHAR) + c->MdSend->Size + c->CipherEncrypt->IvSize + encrypted_size + 256);
+	dest_data = ZeroMalloc(dest_size);
+#endif
 
 	// Encrypt
+#ifndef FUZZING
 	r = CipherProcess(c->CipherEncrypt, c->NextIv, dest_data + sizeof(UCHAR) + c->MdSend->Size + c->CipherEncrypt->IvSize,
 		encrypted_data, encrypted_size);
 	dest_size = sizeof(UCHAR) + c->MdSend->Size + c->CipherEncrypt->IvSize + r;
@@ -1506,6 +1512,7 @@ void OvsSendDataPacket(OPENVPN_CHANNEL *c, UCHAR key_id, UINT data_packet_id, vo
 
 	// Update the NextIV
 	Copy(c->NextIv, dest_data + dest_size - c->CipherEncrypt->IvSize, c->CipherEncrypt->IvSize);
+#endif
 
 	// Op-code
 	dest_data[0] = uc;
@@ -2630,7 +2637,9 @@ OPENVPN_SERVER *NewOpenVpnServer(CEDAR *cedar, INTERRUPT_MANAGER *interrupt, SOC
 
 	OvsLog(s, NULL, NULL, "LO_START");
 
+#ifndef FUZZING
 	s->Dh = DhNewGroup2();
+#endif
 
 	return s;
 }
@@ -2676,7 +2685,9 @@ void FreeOpenVpnServer(OPENVPN_SERVER *s)
 		ReleaseSockEvent(s->SockEvent);
 	}
 
+#ifndef FUZZING
 	DhFree(s->Dh);
+#endif
 
 	Free(s);
 }
@@ -2818,6 +2829,9 @@ bool OvsPerformTcpServer(CEDAR *cedar, SOCK *sock)
 	LIST *ovs_recv_packet;
 	UINT i;
 	bool ret = false;
+#ifdef FUZZING
+    int iterations;
+#endif
 	// Validate arguments
 	if (cedar == NULL || sock == NULL)
 	{
@@ -2872,9 +2886,18 @@ bool OvsPerformTcpServer(CEDAR *cedar, SOCK *sock)
 		}
 
 		// Separate to a list of datagrams by interpreting the data received from the TCP socket
+#ifdef FUZZING
+        iterations = 0;
+#endif
 		while (true)
 		{
 			UINT r = FifoSize(tcp_recv_fifo);
+#ifdef FUZZING
+        iterations++;
+        if ( iterations >= 20 ) {
+            break;
+        }
+#endif
 			if (r >= sizeof(USHORT))
 			{
 				void *ptr = FifoPtr(tcp_recv_fifo);
@@ -2897,6 +2920,7 @@ bool OvsPerformTcpServer(CEDAR *cedar, SOCK *sock)
 							UCHAR *payload_ptr = buf + sizeof(USHORT);
 
 							// Pass the packet to the OpenVPN server
+                            if ( payload_len )  /* REMOVE */
 							Add(ovs_recv_packet, NewUdpPacket(&sock->RemoteIP, sock->RemotePort,
 								&sock->LocalIP, sock->LocalPort,
 								Clone(payload_ptr, payload_len), payload_len));
