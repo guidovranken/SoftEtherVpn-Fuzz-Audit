@@ -666,10 +666,16 @@ L2TP_PACKET *ParseL2TPPacket(UDPPACKET *p)
 	{
 		// L2TP
 		ret->TunnelId = READ_USHORT(buf);
+#ifdef FUZZING
+		ret->TunnelId %= 20;
+#endif
 		buf += 2;
 		size -= 2;
 
 		ret->SessionId = READ_USHORT(buf);
+#ifdef FUZZING
+		ret->SessionId %= 20;
+#endif
 		buf += 2;
 		size -= 2;
 	}
@@ -698,10 +704,16 @@ L2TP_PACKET *ParseL2TPPacket(UDPPACKET *p)
 		}
 
 		ret->Ns = READ_USHORT(buf);
+#ifdef FUZZING
+		ret->Ns %= 20;
+#endif
 		buf += 2;
 		size -= 2;
 
 		ret->Nr = READ_USHORT(buf);
+#ifdef FUZZING
+		ret->Nr %= 20;
+#endif
 		buf += 2;
 		size -= 2;
 	}
@@ -790,6 +802,14 @@ L2TP_PACKET *ParseL2TPPacket(UDPPACKET *p)
 			a.Type = READ_USHORT(buf);
 			buf += 2;
 			size -= 2;
+#ifdef FUZZING
+            if ( a.Type > 71 )
+            {
+                unsigned char validtypes[] = {0, 1, 2, 3, 4, 5, 7, 8, 9, 10, 14, 15, 46, 60, 61, 62, 63, 64, 68, 71};
+                a.Type %= sizeof(validtypes);
+                a.Type = validtypes[a.Type];
+            }
+#endif
 
 			a.DataSize = a.Length - 6;
 			a.Data = Clone(buf, a.DataSize);
@@ -811,13 +831,48 @@ L2TP_PACKET *ParseL2TPPacket(UDPPACKET *p)
 		}
 
 		ret->MessageType = READ_USHORT(a->Data);
+#ifdef FUZZING
+        if ( ret->MessageType > 14 ) {
+            ret->MessageType %= 8;
+            switch ( ret->MessageType ) {
+                case    0:
+                    ret->MessageType = L2TP_MESSAGE_TYPE_SCCRQ;
+                    break;
+                case    1:
+                    ret->MessageType = L2TP_MESSAGE_TYPE_SCCRP;
+                    break;
+                case    2:
+                    ret->MessageType = L2TP_MESSAGE_TYPE_SCCCN;
+                    break;
+                case    3:
+                    ret->MessageType = L2TP_MESSAGE_TYPE_STOPCCN;
+                    break;
+                case    4:
+                    ret->MessageType = L2TP_MESSAGE_TYPE_HELLO;
+                    break;
+                case    5:
+                    ret->MessageType = L2TP_MESSAGE_TYPE_ICRQ;
+                    break;
+                case    6:
+                    ret->MessageType = L2TP_MESSAGE_TYPE_ICCN;
+                    break;
+                case    7:
+                    ret->MessageType = L2TP_MESSAGE_TYPE_CDN;
+                    break;
+            }
+        }
+#endif
 	}
 
 	if (ret->Ver == 3 && ret->IsControl)
 	{
 		// Get the Remote Session ID in the case of L2TPv3
 		L2TP_AVP *a = GetAVPValue(ret, L2TP_AVP_TYPE_V3_SESSION_ID_REMOTE);
+#ifndef FUZZING
 		if (a != NULL && a->DataSize == sizeof(UINT))
+#else
+		if (a != NULL && a->DataSize >= sizeof(UINT))
+#endif
 		{
 			ret->SessionId = READ_UINT(a->Data);
 		}
@@ -1238,9 +1293,16 @@ void L2TPProcessRecvControlPacket(L2TP_SERVER *l2tp, L2TP_TUNNEL *t, L2TP_PACKET
 				// Request to establish a new session arrives
 				L2TP_AVP *a = GetAVPValue(p,
 					(t->IsV3 ? L2TP_AVP_TYPE_V3_SESSION_ID_LOCAL : L2TP_AVP_TYPE_ASSIGNED_SESSION));
+#ifndef FUZZING
 				if (a != NULL && a->DataSize == (t->IsV3 ? sizeof(UINT) : sizeof(USHORT)) && IsZero(a->Data, (t->IsV3 ? sizeof(UINT) : sizeof(USHORT))) == false)
+#else
+				if (a != NULL && a->DataSize >= (t->IsV3 ? sizeof(UINT) : sizeof(USHORT)) && IsZero(a->Data, (t->IsV3 ? sizeof(UINT) : sizeof(USHORT))) == false)
+#endif
 				{
 					UINT session_id = (t->IsV3 ? READ_UINT(a->Data) : READ_USHORT(a->Data));
+#ifdef FUZZING
+                    session_id %= 20;
+#endif
 
 					// Check whether there is other same session ID
 					if (GetSessionFromIdAssignedByClient(t, session_id) == NULL)
@@ -1261,7 +1323,11 @@ void L2TPProcessRecvControlPacket(L2TP_SERVER *l2tp, L2TP_TUNNEL *t, L2TP_PACKET
 
 								a = GetAVPValue(p, L2TP_AVP_TYPE_V3_PW_TYPE);
 
+#ifndef FUZZING
 								if (a != NULL && a->DataSize == sizeof(USHORT))
+#else
+								if (a != NULL && a->DataSize >= sizeof(USHORT))
+#endif
 								{
 									ui = READ_USHORT(a->Data);
 
@@ -1325,7 +1391,11 @@ void L2TPProcessRecvControlPacket(L2TP_SERVER *l2tp, L2TP_TUNNEL *t, L2TP_PACKET
 			{
 				// Tunnel disconnect request arrives
 				L2TP_AVP *a = GetAVPValue(p, (t->IsV3 ? L2TP_AVP_TYPE_V3_TUNNEL_ID : L2TP_AVP_TYPE_ASSIGNED_TUNNEL));
+#ifndef FUZZING
 				if (a != NULL && a->DataSize == (t->IsV3 ? sizeof(UINT) : sizeof(USHORT)))
+#else
+				if (a != NULL && a->DataSize >= (t->IsV3 ? sizeof(UINT) : sizeof(USHORT)))
+#endif
 				{
 					UINT ui = (t->IsV3 ? READ_UINT(a->Data) : READ_USHORT(a->Data));
 
@@ -1363,7 +1433,11 @@ void L2TPProcessRecvControlPacket(L2TP_SERVER *l2tp, L2TP_TUNNEL *t, L2TP_PACKET
 					// Received a session disconnection request
 					L2TP_AVP *a = GetAVPValue(p,
 						(t->IsV3 ? L2TP_AVP_TYPE_V3_SESSION_ID_LOCAL : L2TP_AVP_TYPE_ASSIGNED_SESSION));
+#ifndef FUZZING
 					if (a != NULL && a->DataSize == (t->IsV3 ? sizeof(UINT) : sizeof(USHORT)))
+#else
+					if (a != NULL && a->DataSize >= (t->IsV3 ? sizeof(UINT) : sizeof(USHORT)))
+#endif
 					{
 						UINT ui = (t->IsV3 ? READ_UINT(a->Data) : READ_USHORT(a->Data));
 
@@ -1659,7 +1733,11 @@ void ProcL2TPPacketRecv(L2TP_SERVER *l2tp, UDPPACKET *p)
 	{
 		{
 			L2TP_AVP *a = GetAVPValue(pp, (pp->Ver == 3 ? L2TP_AVP_TYPE_V3_TUNNEL_ID : L2TP_AVP_TYPE_ASSIGNED_TUNNEL));
+#ifndef FUZZING
 			if (a != NULL && a->DataSize == (pp->Ver == 3 ? sizeof(UINT) : sizeof(USHORT)))
+#else
+			if (a != NULL && a->DataSize >= (pp->Ver == 3 ? sizeof(UINT) : sizeof(USHORT)))
+#endif
 			{
 				UINT client_assigned_id = (pp->Ver == 3 ? READ_UINT(a->Data) : READ_USHORT(a->Data));
 				if (GetTunnelFromIdOfAssignedByClient(l2tp, &p->SrcIP, client_assigned_id) == NULL)
@@ -2110,8 +2188,8 @@ void StartL2TPThread(L2TP_SERVER *l2tp, L2TP_TUNNEL *t, L2TP_SESSION *s)
 
 		s->HasThread = true;
 
-#ifndef FUZZING
 		NewTubePair(&s->TubeSend, &s->TubeRecv, 0);
+#ifndef FUZZING
 		SetTubeSockEvent(s->TubeSend, l2tp->SockEvent);
 #endif
 
@@ -2265,6 +2343,21 @@ void L2TPProcessInterrupts(L2TP_SERVER *l2tp)
 
 			if (s->HasThread)
 			{
+#ifdef FUZZING
+                /* In fuzzing mode the s->TubeSend tube is not really connected
+                 * (because there is no PPP thread), so send some data
+                 * into the tube so that SendL2TPDataPacket has something to
+                 * process.
+                 */
+                for (int k = 0; k < 3; k++) {
+                    unsigned char recvbuf[10240];
+                    UINT ret = Recv((SOCK*)8, recvbuf, 10240, false);
+                    if ( ret == 0 || ret == SOCK_LATER ) {
+                        break;
+                    }
+                    TubeSendEx(s->TubeSend, recvbuf, ret, NULL, true);
+                }
+#endif
 				// Send packet data
 				while (true)
 				{

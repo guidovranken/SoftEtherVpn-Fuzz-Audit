@@ -5969,8 +5969,8 @@ void FreeSslPipe(SSL_PIPE *s)
 	FreeSslBio(s->RawIn);
 	FreeSslBio(s->RawOut);
 
-	SSL_free(s->ssl);
 #ifndef FUZZING
+	SSL_free(s->ssl);
 	SSL_CTX_free(s->ssl_ctx);
 #endif
 
@@ -6119,7 +6119,9 @@ bool SslBioSync(SSL_BIO *b, bool sync_send, bool sync_recv)
 					{
 						b->IsDisconnected = true;
 						WHERE;
+#ifndef FUZZING /* NEW */
 						Debug("OpenSSL Error: %s\n", ERR_error_string(ERR_peek_last_error(), NULL));
+#endif
 						return false;
 					}
 				}
@@ -12818,7 +12820,7 @@ bool RecvAll(SOCK *sock, void *data, UINT size, bool secure)
 	{
 		sz = size - recv_size;
 		ret = Recv(sock, (UCHAR *)data + recv_size, sz, secure);
-		if (ret == 0)
+		if (ret == 0 || ret == SOCK_LATER )
 		{
 			return false;
 		}
@@ -12888,7 +12890,7 @@ bool SendAll(SOCK *sock, void *data, UINT size, bool secure)
 	while (true)
 	{
 		ret = Send(sock, buf, size - sent_size, secure);
-		if (ret == 0)
+		if (ret == 0 || ret == SOCK_LATER)
 		{
 			return false;
 		}
